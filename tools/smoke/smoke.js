@@ -483,6 +483,51 @@ const server = http.createServer((req, res) => {
       await page.waitForTimeout(500);
     });
 
+    await step('观点倾向：乐观注入方向指令，客观零注入，消极注入且即时落盘', async () => {
+      const waitReq = async (before) => {
+        const t0 = Date.now();
+        while (Date.now() - t0 < 15000 && mockLLM.count < before + 1) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        if (mockLLM.count < before + 1) throw new Error('请求未到达');
+        return JSON.parse(mockLLM.lastBody || '{}').messages.map((m) => String(m.content)).join('\n');
+      };
+      // 乐观
+      let before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="stance-optimistic"]').click();
+      await page.waitForTimeout(500);
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      let all = await waitReq(before);
+      if (!all.includes('观点倾向') || !all.includes('乐观')) throw new Error('乐观未注入');
+      const onOpt = await page.locator('.xcc-panel [data-act="stance-optimistic"]').evaluate((el) => el.classList.contains('on'));
+      if (!onOpt) throw new Error('乐观按钮未高亮');
+      // 客观（切回默认）：不应再有倾向指令
+      before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="stance-objective"]').click();
+      await page.waitForTimeout(500);
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      all = await waitReq(before);
+      if (all.includes('观点倾向')) throw new Error('客观仍带倾向指令');
+      // 消极
+      before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="stance-pessimistic"]').click();
+      await page.waitForTimeout(500);
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      all = await waitReq(before);
+      if (!all.includes('观点倾向') || !all.includes('审慎')) throw new Error('消极未注入');
+      // 落盘校验（走扩展页读存储）
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      const saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.stance;
+      });
+      if (saved !== 'pessimistic') throw new Error('未落盘: ' + saved);
+      // 收尾恢复客观默认
+      await page.locator('.xcc-panel [data-act="stance-objective"]').click();
+      await page.waitForTimeout(500);
+      return saved;
+    });
+
     await step('生成失败链路：4xx 原文透出并追加换模型提示', async () => {
       const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
       await optsPage.evaluate(async () => {

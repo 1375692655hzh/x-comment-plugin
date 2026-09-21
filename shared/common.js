@@ -88,6 +88,11 @@ const XCC_DEFAULTS = {
   activePersonaId: 'p-general',
   activeGenId: 'g-agree',
 
+  // 观点倾向（v0.5.2）：影响生成评论的观点方向。
+  // 'objective' = 客观，零注入（不往提示词加任何倾向指令，保持纯人设+风格）
+  // 'optimistic' = 乐观 / 'pessimistic' = 消极：buildMessages 注入对应方向指令
+  stance: 'objective',
+
   genParams: {
     temperature: 0.9,
     maxTokens: 400,
@@ -169,6 +174,7 @@ function xccPublicSettings(s) {
     genPresets: s.genPresets,
     activePersonaId: s.activePersonaId,
     activeGenId: s.activeGenId,
+    stance: ['optimistic', 'pessimistic'].includes(s.stance) ? s.stance : 'objective', // 脏值一律按客观
     genParams: {
       xPlan: s.genParams.xPlan === 'premium' ? 'premium' : 'free', // 脏值一律按 free
       targetLength: String(s.genParams.targetLength || '')

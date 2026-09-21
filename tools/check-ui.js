@@ -76,6 +76,11 @@ check(read('shared/api.js').includes('function xccCleanReplyText'), 'api.js 存�
 check(content.includes('plan-free') && content.includes('plan-premium'), '面板存在免费/付费切换按钮');
 check(content.includes('xcc-target-len') && content.includes('xcc-count'), '面板存在目标字数输入与计数器');
 check(/id="panel-side"/.test(oh), '设置页存在面板位置选择');
+check(sw.includes('观点倾向'), 'SW 注入观点倾向指令（乐观/消极）');
+check(
+  content.includes('stance-pessimistic') && content.includes('stance-objective') && content.includes('stance-optimistic'),
+  '面板存在消极/客观/乐观切换按钮'
+);
 
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));

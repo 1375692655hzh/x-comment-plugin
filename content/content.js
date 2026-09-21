@@ -82,7 +82,7 @@
       border-radius: 16px 0 0 16px;
       padding: 14px; z-index: 2147483000;
       box-shadow: -8px 0 32px rgba(0, 0, 0, .5);
-      display: flex; flex-direction: column; gap: 8px;
+      display: flex; flex-direction: column; gap: 6px;
       overflow: hidden; /* 滚动下放给内部滚动区（推文框/输出框） */
     }
     .xcc-panel.left {
@@ -119,8 +119,8 @@
     select option { background: #1f2733; color: #e7e9ea; }
     .xcc-tweet {
       border: 1px dashed rgba(255,255,255,.18); border-radius: 10px;
-      padding: 8px 10px; font-size: 12px;
-      flex: 1 1 0; min-height: 72px; max-height: 190px;
+      padding: 6px 10px; font-size: 12px;
+      flex: 1 1 0; min-height: 64px; max-height: 180px;
       display: flex; flex-direction: column; overflow: hidden;
     }
     .xcc-tweet-hd {
@@ -137,6 +137,13 @@
       background: rgba(255,255,255,.05); color: #9ca3af;
     }
     .xcc-plan-btn.on { color: #fff; border-color: #7c8ff5; background: rgba(124,143,245,.18); }
+    .xcc-stance-row { display: flex; gap: 6px; }
+    .xcc-stance-btn {
+      flex: 1; border-radius: 9px; padding: 5px 0; font-size: 12px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.05); color: #9ca3af;
+    }
+    .xcc-stance-btn.on { color: #fff; border-color: #7c8ff5; background: rgba(124,143,245,.18); }
     input.xcc-target-len { padding: 6px 8px; font-size: 12.5px; height: 30px; }
     .xcc-gen-btn {
       border: none; border-radius: 10px; padding: 9px 0;
@@ -144,8 +151,9 @@
       background: linear-gradient(135deg, #8b5cfa, #4f46e5);
     }
     .xcc-gen-btn:disabled { opacity: .55; cursor: not-allowed; }
-    .xcc-out-bar { display: flex; justify-content: flex-end; flex: 0 0 auto; }
-    .xcc-count { font-size: 11px; color: #9ca3af; }
+    .xcc-out-bar { display: flex; justify-content: flex-end; align-items: center; flex: 0 0 auto;
+      min-height: 14px; margin-bottom: -2px; }
+    .xcc-count { font-size: 11px; color: #9ca3af; line-height: 1.2; }
     .xcc-count.over { color: #f87171; font-weight: 600; }
     /* 生成输出框：v0.5.0 侧栏形态的主区，弹性伸展且占比最大（约为推文框 2.4 倍） */
     textarea.xcc-out {
@@ -153,7 +161,7 @@
       border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
       padding: 9px 10px; font-size: 13px;
       flex: 2.4 1 0; min-height: 260px; resize: none;
-      outline: none; line-height: 1.5; overflow: auto;
+      outline: none; line-height: 1.45; overflow: auto;
     }
     textarea.xcc-out:focus { border-color: #7c8ff5; }
     .xcc-row { display: flex; gap: 6px; }
@@ -189,6 +197,11 @@
     <select class="xcc-persona"></select>
     <label class="xcc-lb">生成风格</label>
     <select class="xcc-gen"></select>
+    <div class="xcc-stance-row">
+      <button class="xcc-stance-btn" data-act="stance-pessimistic">消极</button>
+      <button class="xcc-stance-btn" data-act="stance-objective">客观</button>
+      <button class="xcc-stance-btn" data-act="stance-optimistic">乐观</button>
+    </div>
     <div class="xcc-plan-row">
       <button class="xcc-plan-btn" data-act="plan-free">免费 · ≤280 字符</button>
       <button class="xcc-plan-btn" data-act="plan-premium">付费 · 不限长</button>
@@ -223,6 +236,7 @@
     update: shadow.querySelector('.xcc-update'),
     personaSel: shadow.querySelector('.xcc-persona'),
     genSel: shadow.querySelector('.xcc-gen'),
+    stanceBtns: shadow.querySelectorAll('.xcc-stance-btn'),
     planFree: shadow.querySelector('[data-act="plan-free"]'),
     planPremium: shadow.querySelector('[data-act="plan-premium"]'),
     targetLen: shadow.querySelector('.xcc-target-len'),
@@ -279,6 +293,14 @@
         '）。点右上角 ⚙ 打开设置完成配置后再生成';
   }
 
+  // 观点倾向渲染：消极/客观/乐观三按钮高亮当前值
+  function renderStance() {
+    const v = (state.settings && state.settings.stance) || 'objective';
+    els.stanceBtns.forEach((b) => {
+      b.classList.toggle('on', b.dataset.act === 'stance-' + v);
+    });
+  }
+
   // 账号模式渲染：免费/付费按钮态 + 目标字数输入框显隐 + 计数器刷新
   function renderPlan() {
     const gp = (state.settings && state.settings.genParams) || {};
@@ -332,6 +354,7 @@
     if (show) {
       els.update.textContent = '🆕 有新版 v' + upd.latest + '：点击下载 ZIP，解压替换后重新加载扩展';
     }
+    renderStance();
     renderPlan();
     syncGenBtn();
     syncLauncher();
@@ -851,6 +874,13 @@
       renderPlan();
       mutateSettings((m) => {
         m.genParams.xPlan = v;
+      }).catch(() => {});
+    } else if (act === 'stance-pessimistic' || act === 'stance-objective' || act === 'stance-optimistic') {
+      const v = act.slice('stance-'.length);
+      if (state.settings) state.settings.stance = v;
+      renderStance();
+      mutateSettings((m) => {
+        m.stance = v;
       }).catch(() => {});
     }
   });
