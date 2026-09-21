@@ -374,6 +374,25 @@ function initParamsUI() {
   });
 }
 
+// ---------- 更新检测 ----------
+
+function renderUpdateBanner(u) {
+  $('update-banner').hidden = !(u && u.hasUpdate);
+  if (u && u.hasUpdate) $('update-version').textContent = 'v' + u.latest;
+}
+
+function initUpdateBanner() {
+  (async () => {
+    const { xccUpdate } = await chrome.storage.local.get('xccUpdate');
+    renderUpdateBanner(xccUpdate);
+  })();
+  $('update-open').addEventListener('click', () => send({ type: 'OPEN_DOWNLOAD' }));
+  $('update-check').addEventListener('click', async () => {
+    const r = await send({ type: 'CHECK_UPDATE' });
+    if (r.ok) renderUpdateBanner(r.update);
+  });
+}
+
 // ---------- 启动 ----------
 
 (async function init() {
@@ -381,4 +400,5 @@ function initParamsUI() {
   initProviderUI();
   initPresetUI();
   initParamsUI();
+  initUpdateBanner();
 })();

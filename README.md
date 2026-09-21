@@ -24,6 +24,7 @@ x-comment-plugin/
 ├── content/content.js         # 注入 x.com：捕获推文、悬浮面板、填入输入框
 ├── options/                   # 设置页（接入方式 / 提示词管理 / 生成参数）
 ├── popup/                     # 工具栏弹窗（开关 + 快速切换预设）
+├── tools/                     # update.cmd / update.ps1 一键更新脚本
 └── icons/                     # 图标 + gen-icons.js（零依赖重新生成）
 ```
 
@@ -66,6 +67,18 @@ x-comment-plugin/
 
 技术说明：端点与公开 Client ID 取自 [xai-org/grok-build](https://github.com/xai-org/grok-build) 开源实现（社区包 `@piex-dev/xai-oauth` 同款），并经真实请求验证——授权服务器为 `auth.x.ai`（OIDC discovery 可查），订阅对话调用走 `cli-chat-proxy.grok.com/v1` 并携带 `x-grok-client-*` 识别头。默认模型 `grok-4.3`，可换 `grok-4.5`、`grok-composer-2.5-fast` 等。若 xAI 调整端点，在设置页「高级」中更正即可。
 
+## 获取更新
+
+开发者模式加载的扩展**不会自动更新**，有新版本时插件会自己发现并提醒你（面板和设置页顶部出现「🆕 有新版」黄条），按提示操作即可。三种更新方式任选：
+
+1. **点提示里的链接**：下载最新 ZIP → 解压 → 用新文件夹替换旧的扩展文件夹 → 扩展管理页点「重新加载」
+2. **一键更新（Windows）**：下载仓库后双击 `tools/update.cmd`，脚本自动下载最新版并放到 `C:\Users\<你>\Extensions\xcc-extension`（首次使用后，建议把浏览器的加载路径指向该文件夹，以后双击一次 + 重新加载就完成更新；直连失败会自动尝试本地代理端口）
+3. **手动**：GitHub 仓库页重新下载 ZIP
+
+插件内检测逻辑：浏览器启动/扩展安装时后台对比 GitHub main 分支的版本号（jsDelivr → raw.githubusercontent → GitHub API 三源回退，国内可直连 jsDelivr），设置页也可「重新检查」。
+
+长期方案：上架 Chrome Web Store / Edge Add-ons 后即可全自动更新（见 Roadmap）。
+
 ## 使用
 
 1. 打开 x.com，页面右侧出现紫色 ✦ 悬浮球
@@ -107,6 +120,7 @@ x-comment-plugin/
 
 ## Roadmap
 
+- [ ] 上架 Chrome Web Store / Edge Add-ons（自动更新）
 - [ ] 图文推文的多模态识别（传入图片给视觉模型）
 - [ ] 楼中楼（回复的回复）上下文携带
 - [ ] 配置导入/导出 JSON

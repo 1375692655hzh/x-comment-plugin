@@ -82,6 +82,12 @@
     .xcc-mini:hover { background: rgba(255,255,255,.1); color: #e7e9ea; }
     .xcc-provider { font-size: 11px; color: #9ca3af; }
     .xcc-provider.warn { color: #f59e0b; }
+    .xcc-update {
+      font-size: 11.5px; color: #fbbf24; cursor: pointer;
+      padding: 4px 8px; border-radius: 7px;
+      background: rgba(251, 191, 36, .08);
+    }
+    .xcc-update:hover { background: rgba(251, 191, 36, .16); }
     .xcc-lb { font-size: 11px; color: #9ca3af; margin-top: 2px; }
     select, input.xcc-topic {
       background: rgba(255,255,255,.06); color: #e7e9ea;
@@ -139,6 +145,7 @@
       </span>
     </div>
     <div class="xcc-provider">加载中…</div>
+    <div class="xcc-update" hidden>🆕 有新版</div>
     <label class="xcc-lb">人设</label>
     <select class="xcc-persona"></select>
     <label class="xcc-lb">生成风格</label>
@@ -167,6 +174,7 @@
     hoverBtn: shadow.querySelector('.xcc-hover-btn'),
     panel: shadow.querySelector('.xcc-panel'),
     provider: shadow.querySelector('.xcc-provider'),
+    update: shadow.querySelector('.xcc-update'),
     personaSel: shadow.querySelector('.xcc-persona'),
     genSel: shadow.querySelector('.xcc-gen'),
     tweetBd: shadow.querySelector('.xcc-tweet-bd'),
@@ -217,6 +225,11 @@
     const ok = pub.ready && pub.ready[pub.provider];
     els.provider.textContent = pub.providerLabel + (ok ? '' : ' · 未配置，点 ⚙ 去设置');
     els.provider.classList.toggle('warn', !ok);
+    const upd = pub.update;
+    els.update.hidden = !(upd && upd.hasUpdate);
+    if (upd && upd.hasUpdate) {
+      els.update.textContent = '🆕 有新版 v' + upd.latest + '：点击下载 ZIP，解压替换后重新加载扩展';
+    }
   }
 
   async function refreshSettings() {
@@ -474,6 +487,10 @@
   }
 
   // ---------- 事件绑定 ----------
+
+  els.update.addEventListener('click', () => {
+    send({ type: 'OPEN_DOWNLOAD' });
+  });
 
   els.genBtn.addEventListener('click', generate);
 

@@ -94,3 +94,11 @@ code {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.err { background: var(--danger); }
+
+.update-banner {
+  display: flex; align-items: center; gap: 8px;
+  background: #fef3c7; border: 1px solid #fcd34d; border-radius: 10px;
+  padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: #92400e;
+}
+.update-banner span { flex: 1; }
+.update-banner button { white-space: nowrap; }

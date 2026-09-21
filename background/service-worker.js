@@ -6,6 +6,62 @@
 // =============================================================
 importScripts('/shared/common.js');
 
+// ---------- 版本更新检测 ----------
+// 从仓库 main 分支的 manifest.json 读最新版本号（三个源依次回退，jsDelivr 国内可直连）
+const XCC_REPO = '1375692655hzh/x-comment-plugin';
+const XCC_ZIP_URL = 'https://github.com/' + XCC_REPO + '/archive/refs/heads/main.zip';
+const XCC_UPDATE_SOURCES = [
+  'https://cdn.jsdelivr.net/gh/' + XCC_REPO + '@main/manifest.json',
+  'https://raw.githubusercontent.com/' + XCC_REPO + '/main/manifest.json',
+  'https://api.github.com/repos/' + XCC_REPO + '/contents/manifest.json?ref=main'
+];
+
+function isNewerVersion(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
+async function fetchRemoteVersion() {
+  for (const url of XCC_UPDATE_SOURCES) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) continue;
+      let version = '';
+      if (url.startsWith('https://api.github.com')) {
+        const data = await res.json();
+        version = JSON.parse(atob((data.content || '').replace(/\s/g, ''))).version;
+      } else {
+        version = (await res.json()).version;
+      }
+      if (version) return version;
+    } catch (e) {
+      /* 换下一个源 */
+    }
+  }
+  return null;
+}
+
+async function checkUpdate() {
+  const cur = chrome.runtime.getManifest().version;
+  const latest = await fetchRemoteVersion();
+  const info = {
+    latest: latest || cur,
+    hasUpdate: !!latest && isNewerVersion(latest, cur),
+    checkedAt: Date.now()
+  };
+  await chrome.storage.local.set({ xccUpdate: info });
+  return info;
+}
+
+chrome.runtime.onStartup.addListener(() => checkUpdate());
+
 // ---------- storage ----------
 
 async function getSettings() {
@@ -257,7 +313,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     switch (msg && msg.type) {
       case 'GET_PUBLIC_SETTINGS': {
-        return sendResponse({ ok: true, settings: publicSettings(await getSettings()) });
+        const store = await chrome.storage.local.get(['settings', 'xccUpdate']);
+        return sendResponse({
+          ok: true,
+          settings: { ...publicSettings(xccMergeSettings(store.settings)), update: store.xccUpdate || null }
+        });
+      }
+      case 'CHECK_UPDATE': {
+        const info = await checkUpdate();
+        return sendResponse({ ok: true, update: info });
+      }
+      case 'OPEN_DOWNLOAD': {
+        chrome.tabs.create({ url: XCC_ZIP_URL });
+        return sendResponse({ ok: true });
       }
       case 'SAVE_ACTIVE': {
         const patch = {};
@@ -312,4 +380,5 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener(async () => {
   const { settings } = await chrome.storage.local.get('settings');
   if (!settings) await chrome.storage.local.set({ settings: XCC_DEFAULTS });
+  checkUpdate();
 });
