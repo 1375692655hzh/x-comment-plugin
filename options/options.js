@@ -98,7 +98,7 @@ function initProviderUI() {
   $('xai-model').value = SETTINGS.xai.model;
   $('custom-base').value = SETTINGS.custom.baseUrl;
   $('custom-key').value = SETTINGS.custom.apiKey;
-  $('custom-model').value = SETTINGS.custom.model;
+  renderCustomModels();
   fillOAuthInputs();
   togglePanes();
   renderOAuthStatus();
@@ -106,6 +106,10 @@ function initProviderUI() {
 
   $('xai-save').addEventListener('click', () => saveProvider('xai'));
   $('custom-save').addEventListener('click', () => saveProvider('custom'));
+  $('custom-model-add').addEventListener('click', addCustomModel);
+  $('custom-model-new').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addCustomModel();
+  });
 
   // 模型即选即存：单独换模型不再依赖「开始授权」才落盘
   $('oauth-model').addEventListener('change', onOauthModelChange);
@@ -203,10 +207,11 @@ async function saveProvider(kind) {
     const granted = await requestOrigin(baseUrl);
     if (!granted) statusEl.textContent = '⚠ 未授予网络权限，调用可能被浏览器拦截';
     await saveMutate((m) => {
+      // 合并写：model/models 由模型列表控件即时管理，此处只动连接字段
       m.custom = {
+        ...m.custom,
         baseUrl,
-        apiKey: $('custom-key').value.trim(),
-        model: $('custom-model').value.trim() || 'gpt-4o-mini'
+        apiKey: $('custom-key').value.trim()
       };
     });
   }
@@ -225,6 +230,98 @@ async function saveProvider(kind) {
     statusEl.textContent = '✗ ' + msg;
     toast('已保存，但测试失败：' + msg, true);
   }
+}
+
+// ---------- 自定义接口：模型列表（v0.5.3 多模型，增/删/改名/切换 active 全部即时落盘） ----------
+
+function renderCustomModels() {
+  const box = $('custom-models');
+  box.textContent = '';
+  for (const id of SETTINGS.custom.models) box.appendChild(customModelRow(id));
+}
+
+function customModelRow(id) {
+  const row = document.createElement('div');
+  row.className = 'model-row' + (id === SETTINGS.custom.model ? ' active' : '');
+  row.dataset.model = id; // 供测试与精确定位（input 的 value 不体现在 innerText）
+
+  const radio = document.createElement('input');
+  radio.type = 'radio';
+  radio.name = 'custom-active-model';
+  radio.checked = id === SETTINGS.custom.model;
+  radio.title = '设为当前使用（面板顶部下拉同步）';
+  radio.addEventListener('change', async () => {
+    if (!radio.checked) return;
+    await saveMutate((m) => {
+      m.custom.model = id;
+    });
+    renderCustomModels();
+    toast('当前模型：' + id);
+  });
+
+  const input = document.createElement('input');
+  input.className = 'model-id';
+  input.value = id;
+  input.placeholder = '模型 ID';
+  input.addEventListener('change', async () => {
+    const v = input.value.trim();
+    if (!v || v === id) {
+      input.value = id; // 空输入还原
+      return;
+    }
+    if (SETTINGS.custom.models.includes(v)) {
+      toast('模型 ' + v + ' 已存在，未保存', true);
+      input.value = id;
+      return;
+    }
+    await saveMutate((m) => {
+      const i = m.custom.models.indexOf(id);
+      if (i >= 0) m.custom.models[i] = v;
+      if (m.custom.model === id) m.custom.model = v; // 改的是当前使用行则同步 active
+    });
+    await loadSettings();
+    renderCustomModels();
+    toast('模型已改为 ' + v);
+  });
+
+  const del = mkBtn('删除', 'small danger');
+  del.addEventListener('click', async () => {
+    if (SETTINGS.custom.models.length <= 1) {
+      toast('至少保留一个模型', true);
+      return;
+    }
+    if (!confirm('删除模型「' + id + '」？')) return;
+    await saveMutate((m) => {
+      m.custom.models = m.custom.models.filter((x) => x !== id);
+      if (m.custom.model === id) m.custom.model = m.custom.models[0]; // 删的是 active：顺延首个
+    });
+    await loadSettings();
+    renderCustomModels();
+    toast('已删除');
+  });
+
+  row.append(radio, input, del);
+  return row;
+}
+
+async function addCustomModel() {
+  const input = $('custom-model-new');
+  const v = input.value.trim();
+  if (!v) {
+    toast('模型 ID 不能为空', true);
+    return;
+  }
+  if (SETTINGS.custom.models.includes(v)) {
+    toast('模型 ' + v + ' 已存在', true);
+    return;
+  }
+  await saveMutate((m) => {
+    m.custom.models.push(v); // 不动 active：当前使用保持不变
+  });
+  await loadSettings();
+  renderCustomModels();
+  input.value = '';
+  toast('已添加模型 ' + v);
 }
 
 // ---------- Grok OAuth 设备流（本页直连 auth.x.ai） ----------
@@ -281,14 +378,8 @@ async function restoreOAuthPending() {
 }
 
 // ---------- Grok OAuth：模型目录发现（授权后自动列出可用模型） ----------
-
-const XCC_OAUTH_MODEL_FALLBACK = [
-  'grok-4.3',
-  'grok-4.5',
-  'grok-composer-2.5-fast',
-  'grok-3-fast',
-  'grok-code-fast-1'
-];
+// 内置兜底候选 XCC_OAUTH_MODEL_FALLBACK 已上移到 shared/common.js（v0.5.3，
+// 面板顶部下拉共用；本页不得重复声明——经典 script 共享全局词法环境）
 
 // 重建模型下拉：传入候选 + 硬编码兜底 + 当前已存值 去重合并，末尾追加「自定义 ID…」。
 // 有账号目录（发现落盘或本次发现）时区分「已验证 / 未验证」标注，避免盲选不可用模型。
@@ -297,12 +388,12 @@ function renderOauthModels(models) {
   const sel = $('oauth-model');
   const custom = $('oauth-model-custom');
   const cur = String(SETTINGS.grokOAuth.model || '').trim() || XCC_OAUTH_MODEL_FALLBACK[0];
-  const verified = new Set([
-    ...(SETTINGS.grokOAuth.discoveredModels || []),
-    ...(Array.isArray(models) ? models : [])
-  ]);
-  const hasDiscovery = verified.size > 0;
-  const list = [...new Set([...models, ...XCC_OAUTH_MODEL_FALLBACK, cur])];
+  // 「已验证」只认账号目录（discoveredModels）：传入候选（含兜底）不参与标注，
+  // 否则未授权/离线时兜底项会被整排误标「已验证」（与面板 renderModels 语义对齐）
+  const discovered = SETTINGS.grokOAuth.discoveredModels || [];
+  const verified = new Set(discovered);
+  const hasDiscovery = discovered.length > 0;
+  const list = [...new Set([...(Array.isArray(models) ? models : []), ...XCC_OAUTH_MODEL_FALLBACK, cur])];
   sel.textContent = '';
   for (const m of list) {
     const opt = document.createElement('option');

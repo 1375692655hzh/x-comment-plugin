@@ -82,7 +82,7 @@
       border-radius: 16px 0 0 16px;
       padding: 14px; z-index: 2147483000;
       box-shadow: -8px 0 32px rgba(0, 0, 0, .5);
-      display: flex; flex-direction: column; gap: 6px;
+      display: flex; flex-direction: column; gap: 5px;
       overflow: hidden; /* 滚动下放给内部滚动区（推文框/输出框） */
     }
     .xcc-panel.left {
@@ -193,6 +193,8 @@
     </div>
     <div class="xcc-provider">加载中…</div>
     <div class="xcc-update" hidden>🆕 有新版</div>
+    <label class="xcc-lb">模型</label>
+    <select class="xcc-model" title="当前接入方式的可用模型，切换即生效；完整列表与自定义 ID 请到设置页"></select>
     <label class="xcc-lb">人设</label>
     <select class="xcc-persona"></select>
     <label class="xcc-lb">生成风格</label>
@@ -234,6 +236,7 @@
     panel: shadow.querySelector('.xcc-panel'),
     provider: shadow.querySelector('.xcc-provider'),
     update: shadow.querySelector('.xcc-update'),
+    modelSel: shadow.querySelector('.xcc-model'),
     personaSel: shadow.querySelector('.xcc-persona'),
     genSel: shadow.querySelector('.xcc-gen'),
     stanceBtns: shadow.querySelectorAll('.xcc-stance-btn'),
@@ -337,12 +340,33 @@
     els.launcher.classList.toggle('left', (state.settings && state.settings.panelSide) === 'left');
   }
 
+  // 模型下拉（v0.5.3）：按接入方式渲染候选；grok 授权通道复用「已验证/未验证」标注。
+  // 与 fillSelect 不同：不做 prev 保留——显示值必须严格等于 pub.model（= GENERATE 实际
+  // 使用的模型），远端（设置页）改模型后本面板立即跟真，杜绝"显示 A 实际生成用 B"
+  function renderModels() {
+    const pub = state.settings;
+    if (!pub || !els.modelSel) return;
+    const sel = els.modelSel;
+    const candidates = pub.modelCandidates || [];
+    const verified = new Set(pub.modelVerified || []);
+    const hasMark = (pub.modelVerified || []).length > 0;
+    sel.textContent = '';
+    for (const m of candidates) {
+      const o = document.createElement('option');
+      o.value = m; // value 保持干净 ID：落盘不受标注影响（与设置页 renderOauthModels 同规）
+      o.textContent = hasMark ? (verified.has(m) ? m + '（已验证）' : m + '（未验证）') : m;
+      sel.appendChild(o);
+    }
+    sel.value = candidates.includes(pub.model) ? pub.model : candidates[0] || '';
+  }
+
   function applySettings(pub) {
     state.settings = pub;
     if (pub.enabled === false) els.panel.hidden = true;
     els.panel.classList.toggle('left', pub.panelSide === 'left');
     fillSelect(els.personaSel, pub.personaPresets, pub.activePersonaId);
     fillSelect(els.genSel, pub.genPresets, pub.activeGenId);
+    renderModels();
     const ok = pub.ready && pub.ready[pub.provider];
     els.provider.textContent = pub.providerLabel + (ok ? '' : ' · 未配置，点 ⚙ 去设置');
     els.provider.classList.toggle('warn', !ok);
@@ -624,24 +648,30 @@
     }
   }
 
-  // 空编辑器：把光标落进框架托管的最深文本块（Draft [data-contents] /
-  // Lexical 块级节点），避免 execCommand 把裸文本节点插到托管子树之外——
-  // 那正是"两段重复、上面一段退格删不掉"的幽灵碎片来源
+  // 空编辑器：把光标落进框架托管的最深文本叶子（Draft span[data-text] /
+  // Lexical [data-lexical-text]）。⚠ 逗号选择器按文档序返回首个匹配——块容器
+  // （[data-contents]/<p>）是文本叶子的祖先、永远排在前，旧写法实际把光标落在
+  // 块容器末尾（托管区之外），execCommand 由此把裸文本插进框架不认的位置：
+  // Draft 的 EditorState 与 DOM 分叉后编辑器"死键"（能发送但键盘/退格/光标全失灵）。
+  // 必须按优先级逐个查：Draft 文本叶子 → Lexical 文本叶子 → 空块容器兜底。
   function placeCaretInLeaf(editor) {
     try {
       editor.focus();
       const sel = window.getSelection();
       if (sel.rangeCount && editor.contains(sel.anchorNode) && sel.anchorNode !== editor) return;
       const leaf =
-        editor.querySelector('[data-block], [data-lexical-text="true"], [data-contents], p, span') ||
+        editor.querySelector('span[data-text="true"]') || // Draft.js 文本叶子
+        editor.querySelector('[data-lexical-text="true"]') || // Lexical 文本叶子
+        editor.querySelector('p, div[data-block="true"]') || // 空块（尚无文本叶子）
         editor;
       const range = document.createRange();
       range.selectNodeContents(leaf);
       range.collapse(false);
       sel.removeAllRanges();
       sel.addRange(range);
+      return true;
     } catch (e) {
-      /* 保持 focus 默认位置 */
+      return false;
     }
   }
 
@@ -651,6 +681,41 @@
     } catch (e) {
       return false;
     }
+  }
+
+  // 框架优先插入（v0.5.3）：先派发可取消的合成 beforeinput。Lexical 的输入主通道
+  // 与 Draft.js 的 editOnBeforeInput 都监听原生 beforeinput：preventDefault 后以框架
+  // 自身 EditorState 应用插入——文本必然落在框架状态内、编辑器保持可编辑。
+  // defaultPrevented === true 即框架已认领 → 跳过 execCommand 防二次插入；
+  // 无人认领（裸 contenteditable / 未接 beforeinput 的构建）→ 回落 execCommand
+  // （Chromium 会再派发一次 beforeinput，框架仍有第二次接管机会，且光标已在叶子内）。
+  // 返回 'framework' | 'raw' | 'none'
+  function frameworkInsert(editor, text) {
+    try {
+      const bi = new InputEvent('beforeinput', {
+        inputType: 'insertText',
+        data: text,
+        bubbles: true,
+        cancelable: true
+      });
+      editor.dispatchEvent(bi);
+      if (bi.defaultPrevented) return 'framework';
+    } catch (e) {
+      /* 无 InputEvent 构造器：直接 execCommand */
+    }
+    return rawInsert(editor, text) ? 'raw' : 'none';
+  }
+
+  // state 探针：发送按钮的解禁由框架 EditorState 驱动，是"state 是否真拿到文本"的
+  // 唯一外部可见信号——innerText 校验看不见 execCommand 幽灵（DOM 有字、state 空、
+  // 编辑器死键）。找不到按钮（改版/非回复场景）不误伤。
+  function sendReady(editor) {
+    const dlg = editor.closest('[role="dialog"]') || document;
+    const btn = dlg.querySelector(
+      '[data-testid="tweetButton"], [data-testid="tweetButtonInline"], [data-testid="replyButton"]'
+    );
+    if (!btn) return true;
+    return !(btn.disabled || btn.getAttribute('aria-disabled') === 'true');
   }
 
   // 清空编辑器（范围内全选后 delete，连托管树外的孤儿碎片一并清掉）
@@ -691,25 +756,37 @@
     editor.focus();
     if (normEditorText(editor.innerText)) {
       if (!selectEditorContents(editor)) return 'fail';
+      await sleep(80); // selectionchange 异步：等框架内部选区同步到"全选"，否则替换被插到旧光标处
     } else {
       placeCaretInLeaf(editor);
+      await sleep(80); // 等 selectionchange → 框架内部选区同步（Lexical 异步一帧）
     }
-    let ok = rawInsert(editor, text);
+    let ok = frameworkInsert(editor, text) !== 'none';
     await sleep(200); // 等 Draft/Lexical 完成 模型↔DOM 同步再校验
-    if (ok && countOccurrences(normEditorText(editor.innerText), want) === 1) return 'ok';
+    if (ok && countOccurrences(normEditorText(editor.innerText), want) === 1) {
+      await sleep(250); // 发送钮解禁由 React state→props 异步驱动
+      if (sendReady(editor)) return 'ok';
+      // DOM 有字但发送钮未解禁：state 为空的幽灵插入 → 落入下方清空重插
+    }
 
-    // 异常（0 份或 ≥2 份）：清空后重插
+    // 异常（0 份或 ≥2 份或 state 空）：清空后重插
     clearEditor(editor);
     placeCaretInLeaf(editor);
-    ok = rawInsert(editor, text);
+    await sleep(80);
+    ok = frameworkInsert(editor, text) !== 'none';
     await sleep(200);
-    if (ok && countOccurrences(normEditorText(editor.innerText), want) === 1) return 'recovered';
+    await sleep(250);
+    if (ok && countOccurrences(normEditorText(editor.innerText), want) === 1 && sendReady(editor)) {
+      return 'recovered';
+    }
 
-    // 仍异常：合成 paste 兜底
+    // 仍异常：合成 paste 兜底（走框架粘贴管线，插入必然落在框架状态内）
     clearEditor(editor);
     pasteInsert(editor, text);
-    await sleep(200);
-    if (countOccurrences(normEditorText(editor.innerText), want) === 1) return 'recovered';
+    await sleep(400);
+    if (countOccurrences(normEditorText(editor.innerText), want) === 1 && sendReady(editor)) {
+      return 'recovered';
+    }
 
     clearEditor(editor); // 彻底失败：清场，走剪贴板兜底
     return 'fail';
@@ -895,6 +972,27 @@
     const v = els.genSel.value;
     mutateSettings((m) => {
       m.activeGenId = v;
+    }).catch(() => {});
+  });
+
+  // 模型切换（v0.5.3）：写当前接入方式对应的 model 字段；SW 每次 GENERATE 都重读
+  // settings，落盘即生效。本地即时刷新 provider 行，不等 storage 往返。
+  els.modelSel.addEventListener('change', () => {
+    const v = els.modelSel.value;
+    if (!v) return;
+    if (state.settings) {
+      state.settings.model = v;
+      const prefix = String(state.settings.providerLabel || '').split(' · ')[0];
+      state.settings.providerLabel = prefix + ' · ' + v;
+      const ok = state.settings.ready && state.settings.ready[state.settings.provider];
+      els.provider.textContent = state.settings.providerLabel + (ok ? '' : ' · 未配置，点 ⚙ 去设置');
+    }
+    mutateSettings((m) => {
+      if (m.provider === 'xai') m.xai.model = v;
+      else if (m.provider === 'custom') {
+        if (!m.custom.models.includes(v)) m.custom.models.push(v); // 防御：候选必含 active
+        m.custom.model = v;
+      } else m.grokOAuth.model = v;
     }).catch(() => {});
   });
 

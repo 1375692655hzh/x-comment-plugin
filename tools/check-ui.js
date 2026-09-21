@@ -82,6 +82,27 @@ check(
   '面板存在消极/客观/乐观切换按钮'
 );
 
+// 5.7 v0.5.3 门禁：面板顶部模型下拉 + custom 多模型三端联动
+const common = read('shared/common.js');
+check(content.includes('xcc-model'), '面板存在模型下拉 .xcc-model');
+check(content.includes('function renderModels'), '面板有 renderModels 渲染函数');
+check(content.includes('m.xai.model = v'), '面板切换模型写 xai.model');
+check(content.includes('m.custom.model = v'), '面板切换模型写 custom.model');
+check(content.includes('m.grokOAuth.model = v'), '面板切换模型写 grokOAuth.model');
+check(common.includes('XCC_XAI_MODEL_CANDIDATES'), 'common.js 定义 xai 候选常量（面板/设置页共用）');
+check(common.includes('XCC_OAUTH_MODEL_FALLBACK'), 'common.js 定义 oauth 兜底候选（面板共用）');
+check(!oj.includes('const XCC_OAUTH_MODEL_FALLBACK'), 'options.js 不重复声明兜底常量（防经典 script 共享全局 SyntaxError）');
+check(/models:\s*\[/.test(common.split('custom:')[1] || ''), 'XCC_DEFAULTS.custom 含 models 数组');
+check(/!customModels\.includes\(custom\.model\)/.test(common), 'xccMergeSettings 校正 active ∈ models');
+check(common.includes('modelCandidates'), 'xccPublicSettings 透出 modelCandidates');
+check(oh.includes('id="custom-models"'), '设置页存在模型列表容器 #custom-models');
+check(oh.includes('id="custom-model-add"'), '设置页存在新增模型按钮');
+check(!oh.includes('id="custom-model"'), '设置页已移除单模型输入框 #custom-model');
+check(oj.includes('function renderCustomModels'), '设置页有 renderCustomModels');
+check(oj.includes('至少保留一个模型'), '模型列表删除有「至少保留一个」兜底');
+check(content.includes('function frameworkInsert'), '填入走框架优先插入（beforeinput 认领探测）');
+check(content.includes('span[data-text="true"]'), '光标落位到框架文本叶子（死键根因修复）');
+
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));
 const refs = [

@@ -55,8 +55,13 @@
         <input id="custom-base" placeholder="https://api.openai.com/v1"></div>
       <div class="field"><label>API Key</label>
         <input type="password" id="custom-key" placeholder="sk-..."></div>
-      <div class="field"><label>模型</label>
-        <input id="custom-model" placeholder="gpt-4o-mini / deepseek-chat / moonshot-v1-8k ..."></div>
+      <div class="field"><label>模型列表（单选当前使用；面板顶部下拉同步，切换即生效）</label>
+        <div id="custom-models"></div>
+        <div class="row model-add-row">
+          <input id="custom-model-new" placeholder="新增模型 ID：gpt-4o-mini / deepseek-chat / moonshot-v1-8k …">
+          <button class="small" id="custom-model-add">新增</button>
+        </div>
+      </div>
       <div class="row"><button class="primary" id="custom-save">保存并测试</button>
         <span class="hint" id="custom-status"></span></div>
       <p class="hint">常用：OpenAI https://api.openai.com/v1 · DeepSeek https://api.deepseek.com/v1 ·

@@ -50,6 +50,7 @@
 <div id="modal" role="dialog">
   <div class="card">
     <div id="modal-editor" data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+    <button data-testid="tweetButton" disabled style="margin-top:10px">回复</button>
   </div>
 </div>
 
@@ -60,6 +61,111 @@
       document.getElementById('modal').style.display = 'block';
     });
   });
+
+  // ---------- 最小"框架型编辑器" mock（模拟 Draft.js/Lexical 受控行为，v0.5.3）----------
+  // 三条框架铁律：DOM 只由 state 渲染；beforeinput 永远被认领（选区不在托管文本叶子
+  // 内即"死键"丢弃——正是"execCommand 直插后能发送但键盘失灵"的复现形态）；
+  // paste 走 state 管线。未经 beforeinput 的 DOM 变更（execCommand 幽灵）被周期 reconcile 擦除。
+  (function () {
+    var root = document.getElementById('modal-editor');
+    var state = { text: '', sel: 0 };
+    var stats = { beforeinput: 0, applied: 0, dropped: 0, paste: 0, rerender: 0 };
+    var rendering = false;
+
+    function leaf() { return root.querySelector('span[data-lexical-text="true"]'); }
+
+    function render() {
+      rendering = true;
+      root.textContent = '';
+      var p = document.createElement('p'); // 块容器（对应 data-block/段落）
+      var s = document.createElement('span');
+      s.setAttribute('data-lexical-text', 'true'); // 框架托管文本叶子
+      s.textContent = state.text || '\u200b'; // 空态占位，保证叶子存在
+      p.appendChild(s);
+      root.appendChild(p);
+      var r = document.createRange(); // 框架托管选区（显式落到 state.sel；collapse(bool) 的 true=起点，方向别写反）
+      if (s.firstChild) {
+        r.setStart(s.firstChild, Math.min(state.sel, s.firstChild.length));
+        r.collapse(true);
+      } else {
+        r.selectNodeContents(s);
+        r.collapse(false);
+      }
+      var sel = getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      var btn = document.querySelector('#modal [data-testid="tweetButton"]');
+      if (btn) btn.disabled = state.text.length === 0; // 发送解禁由 state 驱动
+      rendering = false;
+    }
+
+    // 原生选区 → 框架文本点；anchor 不在托管叶子内 → null（悬空选区 = 死键）
+    function mapPoint() {
+      var sel = getSelection();
+      if (!sel.rangeCount) return null;
+      var n = sel.anchorNode;
+      var host = n && (n.nodeType === 3 ? n.parentElement : n);
+      if (!host || host.getAttribute('data-lexical-text') !== 'true') return null;
+      return Math.min(n.nodeType === 3 ? sel.anchorOffset : 0, state.text.length);
+    }
+
+    root.addEventListener('beforeinput', function (e) {
+      if (rendering) return;
+      stats.beforeinput++;
+      var pt = mapPoint();
+      if (e.inputType === 'insertText' && typeof e.data === 'string') {
+        e.preventDefault(); // 框架永远认领 beforeinput
+        if (pt === null || !e.data) { stats.dropped++; return; } // 仅悬空选区才是死键；offset 0 是合法插入点（!pt 会误杀空编辑器）
+        state.text = state.text.slice(0, pt) + e.data + state.text.slice(pt);
+        state.sel = pt + e.data.length;
+        stats.applied++;
+        render();
+      } else if (e.inputType === 'deleteContentBackward') {
+        e.preventDefault();
+        if (!pt || pt === 0) { stats.dropped++; return; }
+        state.text = state.text.slice(0, pt - 1) + state.text.slice(pt);
+        state.sel = pt - 1;
+        stats.applied++;
+        render();
+      }
+    });
+
+    root.addEventListener('paste', function (e) { // 框架粘贴管线（不校验 isTrusted）
+      e.preventDefault();
+      var t = e.clipboardData && e.clipboardData.getData('text/plain');
+      if (!t) return;
+      stats.paste++;
+      state.text += t;
+      state.sel = state.text.length;
+      render();
+    });
+
+    // 周期 reconcile：未经 beforeinput 的 DOM 变更（execCommand 幽灵/裸文本节点）被擦除。
+    // 同时检测托管 span 文本与块容器子节点数——ghost 注在 span 之外时 textContent 比较看不见
+    setInterval(function () {
+      if (rendering || root.offsetParent === null) return;
+      var live = leaf();
+      var p = root.querySelector('p');
+      var dirty = !live || !p || p.childNodes.length !== 1 ||
+        live.textContent.replace(/\u200b/g, '') !== state.text;
+      if (dirty) {
+        stats.rerender++;
+        render();
+      }
+    }, 600);
+
+    window.__fw = {
+      text: function () { return state.text; },
+      canSend: function () { return state.text.length > 0; },
+      stats: stats,
+      reset: function () {
+        state = { text: '', sel: 0 };
+        stats.beforeinput = stats.applied = stats.dropped = stats.paste = stats.rerender = 0;
+        render();
+      }
+    };
+    render();
+  })();
 </script>
 </body>
 </html>

@@ -7,6 +7,21 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+// ---- 可观测性（v0.5.3）：所有输出同步落盘 progress.log（绕过 stdout 管道缓冲/无读端挂起），
+// 供 schtasks/后台等无终端环境轮询进度；stdout 同时照常输出 ----
+const _progPath = path.join(__dirname, 'progress.log');
+try { fs.unlinkSync(_progPath); } catch (e) { /* 首次无文件 */ }
+console.log = function () {
+  const s = Array.from(arguments)
+    .map((x) => (typeof x === 'string' ? x : require('util').inspect(x, { depth: 4 })))
+    .join(' ');
+  try { fs.appendFileSync(_progPath, s + '\n'); } catch (e) { /* 忽略 */ }
+};
+setInterval(() => {
+  try { fs.appendFileSync(_progPath, '[hb ' + new Date().toISOString() + ']\n'); } catch (e) { /* 忽略 */ }
+}, 5000).unref();
+console.log('[boot] smoke starting, node ' + process.version);
+
 // playwright 解析：项目内 → npm 全局顶层 → 全局包的嵌套依赖
 let chromium;
 try {
@@ -34,7 +49,9 @@ const PORT = 8787;
 const here = __dirname;
 const results = [];
 const t = (name, ok, extra) => {
-  results.push((ok ? 'PASS' : 'FAIL') + '  ' + name + (extra !== undefined ? '  — ' + extra : ''));
+  const line = (ok ? 'PASS' : 'FAIL') + '  ' + name + (extra !== undefined ? '  — ' + extra : '');
+  results.push(line);
+  console.log(line); // 实时落盘 progress.log（console.log 已包装为 appendFileSync）
   if (!ok) process.exitCode = 1;
 };
 
@@ -115,6 +132,8 @@ const server = http.createServer((req, res) => {
   fs.rmSync(profileDir, { recursive: true, force: true });
 
   const extPath = path.join(here, 'ext');
+  // ⚠ 必须 headful：Edge channel 的 headless 不注入 content_scripts（v0.5.3 实测
+  // #xcc-host 不存在），扩展冒烟只能真窗口跑。
   const context = await chromium.launchPersistentContext(path.join(here, 'profile'), {
     channel: 'msedge',
     headless: false,
@@ -147,6 +166,7 @@ const server = http.createServer((req, res) => {
 
     // 每步独立 try/catch，失败记录后继续
     const step = async (name, fn) => {
+      console.log('[start] ' + name);
       try {
         const extra = await fn();
         t(name, true, extra);
@@ -212,11 +232,11 @@ const server = http.createServer((req, res) => {
         if (!st.includes('未重复填入')) throw new Error('未走防重分支：' + st);
       });
 
-      // 填入防双击：双击只产生一份
+      // 填入防双击：双击只产生一份（v0.5.3 起编辑器是框架 mock，重置必须走 state 通道）
       await step('填入防双击竞态：只保留一份', async () => {
         await page.evaluate(() => {
           document.getElementById('modal').style.display = 'none';
-          document.getElementById('modal-editor').textContent = '';
+          window.__fw.reset();
         });
         await page.locator('.xcc-out').fill('防抖测试 unique-dbl');
         await page.locator('.xcc-panel [data-act="insert"]').dblclick();
@@ -224,6 +244,75 @@ const server = http.createServer((req, res) => {
         const txt = await page.locator('#modal-editor').innerText();
         const n = txt.split('unique-dbl').length - 1;
         if (n !== 1) throw new Error('出现 ' + n + ' 份');
+      });
+
+      // 框架编辑器：填入必须走框架路径（state 与 DOM 一致、可继续编辑）
+      await step('框架编辑器：填入走框架路径（state 与 DOM 一致，不退化不纠正）', async () => {
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'none';
+          window.__fw.reset();
+        });
+        await page.locator('.xcc-out').fill('框架路径回复 fw-insert');
+        await page.locator('.xcc-panel [data-act="insert"]').click();
+        // 等 applied 或 paste 到来（不赌固定耗时：恢复链串行可达 1.6s+）
+        await page.waitForFunction(
+          () => window.__fw.stats.applied > 0 || window.__fw.stats.paste > 0,
+          null,
+          { timeout: 8000 }
+        );
+        await page.waitForTimeout(600); // 等状态栏文案稳定
+        const st = await page.evaluate(() => ({
+          text: window.__fw.text(),
+          stats: window.__fw.stats,
+          dom: document.getElementById('modal-editor').innerText,
+          status: document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-status').textContent
+        }));
+        if (st.text !== '框架路径回复 fw-insert') {
+          throw new Error('框架 state 未获得文本: ' + JSON.stringify(st.text)); // innerText 校验看不见的盲区
+        }
+        if (!st.dom.includes('fw-insert')) throw new Error('DOM 未渲染');
+        if (st.stats.dropped > 0) throw new Error('存在悬空选区丢弃: ' + JSON.stringify(st.stats));
+        if (st.stats.paste > 0) throw new Error('退化了 paste 兜底');
+        if (st.status.includes('自动纠正')) throw new Error('走了异常恢复路径');
+        return 'applied=' + st.stats.applied;
+      });
+
+      await step('框架编辑器：填入后打字/退格仍生效（死键回归门禁）', async () => {
+        await page.locator('#modal-editor').click();
+        const before = await page.evaluate(() => window.__fw.text());
+        await page.keyboard.type('X');
+        await page.waitForTimeout(300);
+        const typed = await page.evaluate(() => window.__fw.text());
+        if (!(typed.length === before.length + 1 && typed.includes('X'))) {
+          throw new Error('打字未进 state: ' + JSON.stringify({ before: before.length, typed: typed.length }));
+        }
+        await page.keyboard.press('Backspace');
+        await page.waitForTimeout(300);
+        const after = await page.evaluate(() => window.__fw.text());
+        if (after.length !== before.length) throw new Error('退格未生效');
+        if (!(await page.evaluate(() => window.__fw.canSend()))) throw new Error('state 探针 canSend=false');
+      });
+
+      await step('框架编辑器：未经 beforeinput 的 DOM 直插被 reconcile 擦除（mock 有效性）', async () => {
+        // 直接 DOM 写入（不派发任何输入事件），周期 reconcile 必须把它擦掉——
+        // 这才是"execCommand 幽灵"的真实形态：DOM 有字、state 没有。
+        // ⚠ 先显示 modal：mock 的 reconcile 对 offsetParent===null 的编辑器跳过
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'block';
+          const root = document.getElementById('modal-editor');
+          root.querySelector('p').appendChild(document.createTextNode('ghost-fragment'));
+        });
+        const survived = await page.waitForFunction(() => {
+          const live = document.querySelector('#modal-editor span[data-lexical-text="true"]');
+          return live && live.textContent.indexOf('ghost') === -1 && window.__fw.stats.rerender >= 1;
+        }, null, { timeout: 8000 }).then(() => false).catch(() => true);
+        if (survived) throw new Error('mock 未擦除幽灵直插');
+        const text = await page.evaluate(() => window.__fw.text());
+        if (text.includes('ghost')) throw new Error('幽灵文本渗入 state');
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'none';
+          window.__fw.reset();
+        });
       });
 
       // v0.5.0 全高侧边栏形态（v0.5.1 起默认右侧）
@@ -239,7 +328,7 @@ const server = http.createServer((req, res) => {
         if (Math.abs(box.right) > 2) throw new Error('未贴右缘: 距右 ' + box.right);
         return box.pw + 'x' + box.ph;
       });
-      await step('侧栏输出框显著加大（高度 > 300px）且推文框可伸缩', async () => {
+      await step('侧栏输出框显著加大（900px 视口下 >260px，推文框可伸缩）', async () => {
         const box = await page.evaluate(() => {
           const sr = document.querySelector('#xcc-host').shadowRoot;
           return {
@@ -247,7 +336,8 @@ const server = http.createServer((req, res) => {
             th: sr.querySelector('.xcc-tweet-bd').getBoundingClientRect().height
           };
         });
-        if (box.oh <= 300) throw new Error('输出框太小: ' + box.oh);
+        // 900px 冒烟视口基准（v0.5.3 加模型下拉+倾向行后约 280px）；真实用户视口普遍 ≥950，输出框更大
+        if (box.oh < 260) throw new Error('输出框太小: ' + box.oh);
         if (box.th < 40) throw new Error('推文框异常: ' + box.th);
         return 'out=' + Math.round(box.oh) + 'px tweet=' + Math.round(box.th) + 'px';
       });
@@ -271,6 +361,11 @@ const server = http.createServer((req, res) => {
       if (!optsPage) throw new Error('未发现设置页标签');
       const ready = await optsPage.locator('.provider-item').count();
       if (ready < 3) throw new Error('设置页渲染异常');
+      // 全局自动接受 confirm：删除模型等确认框一旦无人处理，页面所有后续操作会被
+      // Playwright 永久挂起（v0.5.3 实测卡死根因）。测试内 confirm 全部意图为"允许"。
+      optsPage.on('dialog', (d) => {
+        d.accept().catch(() => {});
+      });
       return optsPage.url().slice(-24);
     });
 
@@ -384,6 +479,90 @@ const server = http.createServer((req, res) => {
           ' | genParams=' + JSON.stringify(body.messages && body.messages.length)
         );
       }
+    });
+
+    // v0.5.3 面板顶部模型下拉（provider 行之下、人设之上）
+    await step('面板顶部模型下拉：列出 custom models 且当前值选中', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.provider = 'custom';
+        m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'm-a', models: ['m-a', 'm-b'] };
+        await chrome.storage.local.set({ settings: m });
+      });
+      await page.bringToFront();
+      await page.waitForTimeout(700);
+      const n = await page.locator('.xcc-model option').count();
+      if (n !== 2) throw new Error('候选数异常: ' + n);
+      const v = await page.locator('.xcc-model').inputValue();
+      if (v !== 'm-a') throw new Error('当前值未选中: ' + v);
+      return v;
+    });
+
+    await step('面板切换模型：即时落盘 + provider 行刷新 + 生成请求 model 变化', async () => {
+      await page.locator('.xcc-model').selectOption('m-b');
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      // 轮询存储收敛（content 侧 mutateSettings 是 fire-and-forget，固定 sleep 有竞态）
+      await optsPage.waitForFunction(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.custom && settings.custom.model === 'm-b';
+      }, null, { timeout: 8000 });
+      const saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.custom.model;
+      });
+      if (saved !== 'm-b') throw new Error('未落盘: ' + saved);
+      const label = await page.locator('.xcc-provider').innerText();
+      if (!label.includes('m-b')) throw new Error('provider 行未刷新: ' + label);
+      const before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15000 && mockLLM.count < before + 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (mockLLM.count < before + 1) throw new Error('请求未到达');
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      if (body.model !== 'm-b') throw new Error('生成 model 未切换: ' + body.model);
+      return body.model;
+    });
+
+    await step('grok-oauth 面板候选：发现∪兜底∪当前值去重 + 已验证标注 + 不混入哨兵', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.provider = 'grok-oauth';
+        m.grokOAuth.discoveredModels = ['grok-4.3', 'grok-smoke-disc'];
+        await chrome.storage.local.set({ settings: m });
+      });
+      await page.bringToFront();
+      await page.waitForTimeout(700);
+      const infos = await page.evaluate(() =>
+        [...document.querySelector('#xcc-host').shadowRoot.querySelectorAll('.xcc-model option')]
+          .map((o) => ({ v: o.value, t: o.textContent }))
+      );
+      const vals = infos.map((x) => x.v);
+      if (new Set(vals).size !== vals.length) throw new Error('候选未去重');
+      if (!vals.includes('grok-smoke-disc') || !vals.includes('grok-4.5')) {
+        throw new Error('合并缺项: ' + vals.join(','));
+      }
+      if (!infos.find((x) => x.v === 'grok-smoke-disc').t.includes('已验证')) {
+        throw new Error('发现模型未标注已验证');
+      }
+      if (!infos.find((x) => x.v === 'grok-4.5').t.includes('未验证')) {
+        throw new Error('兜底模型应标注未验证');
+      }
+      if (vals.includes('__custom__')) throw new Error('面板混入自定义哨兵');
+      await optsPage.evaluate(async () => {
+        // 收尾恢复 custom 供后续步骤
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.provider = 'custom';
+        m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'm-a', models: ['m-a', 'm-b'] };
+        await chrome.storage.local.set({ settings: m });
+      });
+      return vals.length + ' 个候选';
     });
 
     await step('清洗：剥 markdown/前言后语且保留 #hashtag，system 含格式硬约束', async () => {
@@ -534,11 +713,17 @@ const server = http.createServer((req, res) => {
         const { settings } = await chrome.storage.local.get('settings');
         settings.provider = 'custom';
         settings.custom.model = 'missing-model';
+        settings.custom.models = ['missing-model']; // 不写则 merge 会校正回 models[0]，404 不触发
         settings.genParams.reasoningEffort = 'default';
         await chrome.storage.local.set({ settings });
       });
       await page.bringToFront();
-      await page.waitForTimeout(700);
+      await page.waitForTimeout(700); // storage.onChanged → refreshSettings
+      // 确认面板已按 missing-model 渲染（generate() 用 state.settings 快照，未收敛会打到旧模型）
+      await page.waitForFunction(() => {
+        const sel = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-model');
+        return !!(sel && sel.value === 'missing-model');
+      }, null, { timeout: 8000 });
       if (await page.locator('.xcc-gen-btn').isDisabled()) throw new Error('按钮被误禁用');
       await page.locator('.xcc-gen-btn').click();
       await page.waitForFunction(() => {
@@ -704,6 +889,93 @@ const server = http.createServer((req, res) => {
         await chrome.storage.local.set({ settings });
       });
       oauthState.grant = false;
+    });
+
+    // v0.5.3 设置页：自定义接口模型列表管理
+    await step('设置页模型列表：新增/切换 active/删除（删 active 顺延）即时落盘', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.provider = 'custom';
+        m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'm-a', models: ['m-a', 'm-b'] };
+        await chrome.storage.local.set({ settings: m });
+      });
+      await optsPage.reload();
+      await optsPage.waitForTimeout(900);
+      // 新增 m-c（不动 active）
+      await optsPage.locator('#custom-model-new').fill('m-c');
+      await optsPage.locator('#custom-model-add').click();
+      await optsPage.waitForTimeout(700);
+      let saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return { models: settings.custom.models, model: settings.custom.model };
+      });
+      if (!saved.models.includes('m-c') || saved.model !== 'm-a') {
+        throw new Error('新增异常: ' + JSON.stringify(saved));
+      }
+      // 切 active 到 m-c
+      await optsPage.locator('.model-row[data-model="m-c"] input[type=radio]').check();
+      await optsPage.waitForTimeout(700);
+      saved = await optsPage.evaluate(async () => (await chrome.storage.local.get('settings')).settings.custom.model);
+      if (saved !== 'm-c') throw new Error('active 未切换: ' + saved);
+      // 删除 active 行 m-c → active 顺延（confirm 已由全局 dialog handler 自动 accept）
+      await optsPage.locator('.model-row[data-model="m-c"] button').click();
+      await optsPage.waitForTimeout(700);
+      saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return { models: settings.custom.models, model: settings.custom.model };
+      });
+      if (saved.models.includes('m-c') || saved.model !== 'm-a') {
+        throw new Error('删除/顺延异常: ' + JSON.stringify(saved));
+      }
+      return JSON.stringify(saved.models);
+    });
+
+    await step('模型列表至少保留一个：删除唯一行被拒', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.locator('.model-row[data-model="m-b"] button').click(); // confirm 全局 accept
+      // 等 SETTINGS 重载并重渲染为 1 行（固定 sleep 有竞态：重载未完成时点删会走 confirm 被自动 dismiss）
+      await optsPage.waitForFunction(() => document.querySelectorAll('.model-row').length === 1, null, {
+        timeout: 8000
+      });
+      // 只剩 m-a，再删：应 toast 拒绝且存储不变
+      await optsPage.locator('.model-row[data-model="m-a"] button').click();
+      await optsPage.waitForTimeout(500);
+      const txt = await optsPage.locator('#toast').innerText();
+      if (!txt.includes('至少保留一个模型')) throw new Error('未拦截: ' + txt);
+      const models = await optsPage.evaluate(
+        async () => (await chrome.storage.local.get('settings')).settings.custom.models
+      );
+      if (models.length !== 1 || models[0] !== 'm-a') throw new Error('存储被误删: ' + JSON.stringify(models));
+    });
+
+    await step('旧数据迁移：无 custom.models 的单值进数组且面板同步', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        delete settings.custom.models;
+        settings.custom.model = 'legacy-model';
+        await chrome.storage.local.set({ settings });
+      });
+      const rb = await optsPage.evaluate(async () => {
+        const m = xccMergeSettings((await chrome.storage.local.get('settings')).settings);
+        return { models: m.custom.models, model: m.custom.model };
+      });
+      if (JSON.stringify(rb.models) !== JSON.stringify(['legacy-model']) || rb.model !== 'legacy-model') {
+        throw new Error('迁移异常: ' + JSON.stringify(rb));
+      }
+      await page.bringToFront();
+      await page.waitForTimeout(700);
+      const v = await page.locator('.xcc-model').inputValue();
+      if (v !== 'legacy-model') throw new Error('面板未同步迁移值: ' + v);
+      await optsPage.evaluate(async () => {
+        // 收尾恢复
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'm-a', models: ['m-a', 'm-b'] };
+        await chrome.storage.local.set({ settings: m });
+      });
     });
 
     // v0.5.0 面板左右切换（storage.onChanged → applySettings → .left 类）；v0.5.1 默认右侧

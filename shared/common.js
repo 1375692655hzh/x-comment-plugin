@@ -6,13 +6,36 @@
 //  - options / popup: <script src="../shared/common.js"></script>
 // =============================================================
 
+// xAI 常见模型候选（设置页 datalist 与面板顶部下拉共用；当前值另行合并进候选）
+const XCC_XAI_MODEL_CANDIDATES = [
+  'grok-4-fast-non-reasoning',
+  'grok-4-fast-reasoning',
+  'grok-4',
+  'grok-3',
+  'grok-3-mini'
+];
+
+// Grok OAuth 内置兜底候选（options 页与面板顶部下拉共用）
+const XCC_OAUTH_MODEL_FALLBACK = [
+  'grok-4.3',
+  'grok-4.5',
+  'grok-composer-2.5-fast',
+  'grok-3-fast',
+  'grok-code-fast-1'
+];
+
 const XCC_DEFAULTS = {
   enabled: true,
   provider: 'xai', // 'xai' | 'custom' | 'grok-oauth'
 
   xai: { apiKey: '', model: 'grok-4-fast-non-reasoning' },
 
-  custom: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
+  custom: {
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    model: 'gpt-4o-mini', // 当前使用（active），恒 ∈ models（v0.5.3 起约束）
+    models: ['gpt-4o-mini'] // 可用模型列表（设置页可增删，面板顶部下拉数据源）
+  },
 
   // Grok 账号授权（OAuth 2.0 Device Flow，grok CLI 同款）。
   // 端点与公开 client_id 取自 xai-org/grok-build 开源实现（社区包 @piex-dev/xai-oauth 同款），
@@ -116,11 +139,25 @@ function xccMergeSettings(saved) {
   const g = s.grokOAuth || {};
   const grokOAuth =
     !g.tokens && !g.clientId ? XCC_DEFAULTS.grokOAuth : { ...XCC_DEFAULTS.grokOAuth, ...g };
+  // v0.5.3 迁移：旧数据只有单 custom.model（或 models 缺失/为空/脏值）→ 收敛为 [model]；
+  // active 不在列表内（如别端删掉了 active 行）→ 重置为首个，保证 GENERATE 恒有合法模型。
+  // ⚠ models 必须从"合并前的原始存储值"判断——先合并默认值会让 models:['gpt-4o-mini']
+  //   恒存在，收敛分支成死代码，旧用户的 model 被静默重置（cursor 审查发现的 P0）
+  const rawCustom = s.custom || {};
+  let customModels = Array.isArray(rawCustom.models)
+    ? rawCustom.models.map((m) => String(m || '').trim()).filter(Boolean)
+    : [];
+  const custom = { ...XCC_DEFAULTS.custom, ...rawCustom };
+  if (!customModels.length) {
+    customModels = [String(custom.model || '').trim() || XCC_DEFAULTS.custom.model];
+  }
+  if (!customModels.includes(custom.model)) custom.model = customModels[0];
+  custom.models = [...new Set(customModels)];
   return {
     ...XCC_DEFAULTS,
     ...s,
     xai: { ...XCC_DEFAULTS.xai, ...(s.xai || {}) },
-    custom: { ...XCC_DEFAULTS.custom, ...(s.custom || {}) },
+    custom,
     grokOAuth,
     genParams: { ...XCC_DEFAULTS.genParams, ...(s.genParams || {}) },
     personaPresets:
@@ -155,16 +192,35 @@ function xccIsNewerVersion(a, b) {
 
 // 脱敏的公开配置视图（content/popup 直接本地计算，不依赖后台 SW）
 function xccPublicSettings(s) {
+  const isXai = s.provider === 'xai';
+  const isCustom = s.provider === 'custom';
+  const model = isXai ? s.xai.model : isCustom ? s.custom.model : s.grokOAuth.model;
   const label =
     s.provider === 'xai'
-      ? 'xAI API · ' + s.xai.model
+      ? 'xAI API · ' + model
       : s.provider === 'custom'
-        ? '自定义 · ' + s.custom.model
-        : 'Grok 授权 · ' + s.grokOAuth.model;
+        ? '自定义 · ' + model
+        : 'Grok 授权 · ' + model;
+  // v0.5.3：面板顶部模型下拉数据源（按接入方式合并去重，恒含当前值）
+  let modelCandidates;
+  let modelVerified = []; // 仅 grok-oauth 非空：已确认在账号目录内的 ID（「已验证」标注集合）
+  if (isXai) {
+    modelCandidates = [...new Set([...XCC_XAI_MODEL_CANDIDATES, model])];
+  } else if (isCustom) {
+    const arr = Array.isArray(s.custom.models) ? s.custom.models : [];
+    modelCandidates = [...new Set([...(arr.length ? arr : [model]), model])];
+  } else {
+    const disc = Array.isArray(s.grokOAuth.discoveredModels) ? s.grokOAuth.discoveredModels : [];
+    modelVerified = disc;
+    modelCandidates = [...new Set([...disc, ...XCC_OAUTH_MODEL_FALLBACK, model])];
+  }
   return {
     enabled: s.enabled !== false,
     provider: s.provider,
     providerLabel: label,
+    model, // 当前使用的模型 ID（面板下拉选中项 = GENERATE 实际使用）
+    modelCandidates, // 候选顺序即展示顺序
+    modelVerified, // 空数组 = 不做「已验证/未验证」标注
     ready: {
       xai: !!s.xai.apiKey,
       custom: !!s.custom.baseUrl,

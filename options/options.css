@@ -112,3 +112,11 @@ code {
 .update-banner[hidden] { display: none; }
 .update-banner span { flex: 1; }
 .update-banner button { white-space: nowrap; }
+
+/* v0.5.3 自定义接口模型列表 */
+#custom-models { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.model-row { display: flex; align-items: center; gap: 8px; }
+.model-row input[type="radio"] { width: auto; flex: 0 0 auto; }
+.model-row .model-id { flex: 1; font-family: Consolas, monospace; }
+.model-row.active .model-id { border-color: var(--brand); }
+.model-add-row input { flex: 1; }
