@@ -24,6 +24,11 @@ if (!man.content_scripts[0].matches.includes(test)) {
 for (const war of man.web_accessible_resources || []) {
   if (!war.matches.includes(test)) war.matches.push(test);
 }
+// 本地 OAuth 模拟端点需要 host_permissions（扩展页直连 fetch）
+if (!(man.host_permissions || []).includes(test)) {
+  man.host_permissions = man.host_permissions || [];
+  man.host_permissions.push(test);
+}
 fs.writeFileSync(manPath, JSON.stringify(man, null, 2));
 
 // 诊断注入：在测试版 SW 各关键点写 storage 标记，用于定位卡死位置

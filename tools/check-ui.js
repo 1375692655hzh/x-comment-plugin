@@ -47,7 +47,21 @@ const sentTypes = new Set([
   ...[...pj.matchAll(/type: '([A-Z_]+)'/g)].map((m) => m[1])
 ]);
 for (const t of sentTypes) check(sw.includes(`case '${t}'`), `消息 ${t} 后台有处理器`);
-check(sentTypes.size >= 6, `消息类型覆盖正常（${sentTypes.size} 个）`);
+check(sentTypes.size >= 2, `消息类型覆盖正常（${sentTypes.size} 个）`);
+
+// 5.5 共享网络层（options 与 SW 共用）
+check(fs.existsSync(path.join(root, 'shared/api.js')), 'shared/api.js 存在');
+check(sw.includes("importScripts('/shared/common.js', '/shared/api.js')"), 'SW 加载 api.js');
+check(oh.includes('../shared/api.js'), 'options.html 引用 api.js');
+// SW 顶层不得与共享文件重复声明 const（重复声明 = SW 实例化崩溃）
+{
+  const swBody = sw.replace(/^importScripts.*$/m, '');
+  const sharedSrc = read('shared/common.js') + read('shared/api.js');
+  const sharedConsts = [...sharedSrc.matchAll(/^const ([A-Z_]+)/gm)].map((m) => m[1]);
+  for (const c of new Set(sharedConsts)) {
+    check(!new RegExp(`^(const|let) ${c}\\b`, 'm').test(swBody), `SW 无重复声明 const ${c}`);
+  }
+}
 
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));

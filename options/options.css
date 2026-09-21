@@ -100,5 +100,7 @@ code {
   background: #fef3c7; border: 1px solid #fcd34d; border-radius: 10px;
   padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: #92400e;
 }
+/* display:flex 会盖掉 UA 的 [hidden]{display:none}，必须显式声明 */
+.update-banner[hidden] { display: none; }
 .update-banner span { flex: 1; }
 .update-banner button { white-space: nowrap; }

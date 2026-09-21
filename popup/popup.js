@@ -23,6 +23,11 @@ function fill(sel, list, activeId) {
 }
 
 async function init() {
+  // 扩展重载后旧弹窗的上下文已失效，直接提示重开
+  if (!(chrome.runtime && chrome.runtime.id)) {
+    $('provider-label').textContent = '扩展已重载，请关闭本弹窗后重新打开';
+    return;
+  }
   try {
     const { settings } = await chrome.storage.local.get('settings');
     const pub = xccPublicSettings(xccMergeSettings(settings));
@@ -53,7 +58,10 @@ $('gen').addEventListener('change', () => {
     m.activeGenId = v;
   }).catch(() => {});
 });
-$('open-options').addEventListener('click', () => chrome.runtime.openOptionsPage());
+// tabs.create 不需要 "tabs" 权限；openOptionsPage 可能聚焦重载前的孤儿设置页
+$('open-options').addEventListener('click', () =>
+  chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html') })
+);
 $('open-x').addEventListener('click', () => chrome.tabs.create({ url: 'https://x.com' }));
 
 init();

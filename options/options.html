@@ -132,11 +132,12 @@
       <span class="hint" id="params-status"></span></div>
   </section>
 
-  <p class="foot">所有配置仅保存在本地（chrome.storage.local），API Key 不上传任何第三方服务器，接口请求由扩展后台直达你所选的服务商。</p>
+  <p class="foot">所有配置仅保存在本地（chrome.storage.local），API Key 不上传任何第三方服务器。设置页的网络请求（授权/测试/更新检查）由本页直达服务商，生成由扩展后台直达——全程无中间层。</p>
 </main>
 
 <div id="toast" class="toast"></div>
 <script src="../shared/common.js"></script>
+<script src="../shared/api.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

@@ -38,8 +38,29 @@ const t = (name, ok, extra) => {
   if (!ok) process.exitCode = 1;
 };
 
-// ---------- 本地静态服务 ----------
+// ---------- 本地静态服务 + OAuth 模拟端点 ----------
+const oauthState = { grant: false };
+
 const server = http.createServer((req, res) => {
+  const send = (code, body, type) => {
+    res.writeHead(code, { 'Content-Type': type || 'application/json; charset=utf-8' });
+    res.end(typeof body === 'string' ? body : JSON.stringify(body));
+  };
+  if (req.method === 'POST' && req.url === '/oauth/device') {
+    return send(200, {
+      device_code: 'dev-smoke',
+      user_code: 'SMOKE-CODE',
+      verification_uri: 'http://localhost:8787/oauth/device',
+      verification_uri_complete: 'http://localhost:8787/oauth/device?uc=SMOKE-CODE',
+      expires_in: 120,
+      interval: 1
+    });
+  }
+  if (req.method === 'POST' && req.url === '/oauth/token') {
+    return oauthState.grant
+      ? send(200, { access_token: 'smoke-at', refresh_token: 'smoke-rt', expires_in: 3600 })
+      : send(400, { error: 'authorization_pending' });
+  }
   const file = req.url === '/' || req.url === '/page.html' ? 'page.html' : req.url.replace(/\//g, '');
   const p = path.join(here, file);
   if (fs.existsSync(p) && fs.statSync(p).isFile()) {
@@ -154,22 +175,114 @@ const server = http.createServer((req, res) => {
       return optsPage.url().slice(-24);
     });
 
-    // 5. 诊断（仅记录）：扩展页→SW 消息往返。
-    //    注：本自动化 Edge 环境（playwright --load-extension）存在 SW 不执行的已知限制，
-    //    此探针 TIMEOUT 不代表真实环境故障；真实环境中 GENERATE 等功能依赖 SW。
-    await step('诊断记录：扩展页→SW 消息往返（自动化环境允许 TIMEOUT）', async () => {
+    // 5. SW 启动探针（硬断言）：const 重复声明崩溃的回归门禁
+    await step('SW 脚本已执行（防 const 重复声明回归）', async () => {
       const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
-      const probe = await optsPage.evaluate(async () => {
-        const out = {};
-        try {
-          out.swReply = await Promise.race([
-            new Promise((res) => chrome.runtime.sendMessage({ type: 'CHECK_UPDATE' }, (r) => res(r ? 'ok' : null))),
-            new Promise((res) => setTimeout(() => res('TIMEOUT'), 4000))
-          ]);
-        } catch (e) { out.swErr = String(e); }
-        return JSON.stringify(out);
+      const boot = await optsPage.evaluate(
+        () =>
+          new Promise((res) =>
+            chrome.storage.local.get(['swBoot', 'swMsg'], (r) => res(r.swBoot || r.swMsg || null))
+          )
+      );
+      if (!boot) throw new Error('swBoot 缺失：SW 脚本未执行（疑似实例化崩溃）');
+      return boot;
+    });
+
+    // 6. 生成按钮门控：未配置禁用 → 配置后联动解禁（storage.onChanged 链路）
+    await step('未配置模型时生成按钮禁用', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.provider = 'xai';
+        m.xai.apiKey = '';
+        await chrome.storage.local.set({ settings: m });
       });
-      return probe.slice(0, 60);
+      await page.bringToFront();
+      await page.waitForTimeout(700);
+      if (!(await page.locator('.xcc-gen-btn').isDisabled())) throw new Error('按钮未禁用');
+    });
+    await step('配置 Key 后生成按钮联动解禁', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.xai.apiKey = 'xai-smoke-key';
+        await chrome.storage.local.set({ settings });
+      });
+      await page.waitForTimeout(700);
+      if (await page.locator('.xcc-gen-btn').isDisabled()) throw new Error('按钮未解禁');
+    });
+
+    // 7. 更新横幅免疫：伪造 hasUpdate=true 但版本相同 → 必须隐藏
+    await step('横幅不信旧结论（等版本+hasUpdate=true 仍隐藏）', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        await chrome.storage.local.set({
+          xccUpdate: { latest: chrome.runtime.getManifest().version, hasUpdate: true, checkedAt: Date.now() }
+        });
+      });
+      await optsPage.reload();
+      await optsPage.waitForTimeout(900);
+      const visible = await optsPage.locator('#update-banner').isVisible();
+      if (visible) {
+        const txt = await optsPage.locator('#update-banner').innerText().catch(() => '');
+        const stored = await optsPage.evaluate(async () => {
+          const { xccUpdate } = await chrome.storage.local.get('xccUpdate');
+          return JSON.stringify(xccUpdate) + ' | installed=' + chrome.runtime.getManifest().version;
+        });
+        throw new Error('横幅误报：' + txt.slice(0, 60) + ' || ' + stored);
+      }
+    });
+
+    // 8. OAuth 设备流全流程（本页直连，全程零 SW 消息）
+    await step('OAuth 设备流：发起授权显示验证码（无 SW）', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.provider = 'grok-oauth';
+        m.grokOAuth.deviceEndpoint = 'http://localhost:8787/oauth/device';
+        m.grokOAuth.tokenEndpoint = 'http://localhost:8787/oauth/token';
+        await chrome.storage.local.set({ settings: m });
+      });
+      await optsPage.reload();
+      await optsPage.waitForTimeout(900);
+      if (!(await optsPage.locator('#pane-oauth').isVisible())) throw new Error('oauth 面板未显示');
+      await optsPage.locator('#oauth-start').click();
+      await optsPage.waitForTimeout(1500);
+      const code = await optsPage.locator('#oauth-code').innerText();
+      if (!code.includes('SMOKE-CODE')) throw new Error('验证码错误：' + code);
+    });
+    await step('OAuth 设备流：授权成功并持久化 token', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      oauthState.grant = true; // 模拟用户在授权页点了允许
+      await optsPage.waitForFunction(
+        () => document.getElementById('oauth-status').textContent.includes('授权成功'),
+        null,
+        { timeout: 15000 }
+      );
+      const at = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.grokOAuth.tokens && settings.grokOAuth.tokens.access_token;
+      });
+      if (at !== 'smoke-at') throw new Error('token 未持久化: ' + at);
+    });
+    await step('OAuth 登出清除 token', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.locator('#oauth-logout').click();
+      await optsPage.waitForTimeout(800);
+      const t = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.grokOAuth.tokens;
+      });
+      if (t) throw new Error('token 未清除');
+      // 收尾：恢复 xai 供下次运行
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.provider = 'xai';
+        await chrome.storage.local.set({ settings });
+      });
+      oauthState.grant = false;
     });
 
     // 汇总

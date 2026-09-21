@@ -1,73 +1,18 @@
 // =============================================================
-// X 评论副驾 — MV3 Service Worker
-// 职责：统一代理 LLM API 调用（绕开页面 CORS）、组装提示词、
-//       管理 Grok OAuth 设备流、维护设置存储
-// 页面（content/popup/options）不直接持有 API Key，全部经此转发
+// X 评论副驾 — MV3 Service Worker（薄壳，v0.4.0）
+// 职责：GENERATE（content 发起，需要跨域豁免）+ 兼容兜底消息。
+// 设置页的网络操作（OAuth 设备流/连通测试/更新检查）已迁移至
+// options 页直连（见 shared/api.js），不再依赖本文件存活。
+//
+// ⚠⚠ 本文件严禁声明 shared/*.js 已有的顶层 const！
+//   classic script 共享全局词法环境，跨文件重复声明 const 会导致
+//   整个 SW 实例化时 SyntaxError、一行都不会执行。
+//   v0.3.1–v0.3.3 的"后台注册了但永不响应"正是这个原因（const XCC_ZIP_URL
+//   与 shared/common.js 重复声明），曾被误诊为 Edge 休眠问题。
 // =============================================================
-importScripts('/shared/common.js');
+importScripts('/shared/common.js', '/shared/api.js');
 
-// ---------- 版本更新检测 ----------
-// 从仓库 main 分支的 manifest.json 读最新版本号（三个源依次回退，jsDelivr 国内可直连）
-const XCC_REPO = '1375692655hzh/x-comment-plugin';
-const XCC_ZIP_URL = 'https://github.com/' + XCC_REPO + '/archive/refs/heads/main.zip';
-const XCC_UPDATE_SOURCES = [
-  'https://cdn.jsdelivr.net/gh/' + XCC_REPO + '@main/manifest.json',
-  'https://raw.githubusercontent.com/' + XCC_REPO + '/main/manifest.json',
-  'https://api.github.com/repos/' + XCC_REPO + '/contents/manifest.json?ref=main'
-];
-
-function isNewerVersion(a, b) {
-  return xccIsNewerVersion(a, b); // 共享实现见 shared/common.js
-}
-
-async function fetchRemoteVersion() {
-  for (const url of XCC_UPDATE_SOURCES) {
-    try {
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) continue;
-      let version = '';
-      if (url.startsWith('https://api.github.com')) {
-        const data = await res.json();
-        version = JSON.parse(atob((data.content || '').replace(/\s/g, ''))).version;
-      } else {
-        version = (await res.json()).version;
-      }
-      if (version) return version;
-    } catch (e) {
-      /* 换下一个源 */
-    }
-  }
-  return null;
-}
-
-async function checkUpdate() {
-  const cur = chrome.runtime.getManifest().version;
-  const latest = await fetchRemoteVersion();
-  const info = {
-    latest: latest || cur,
-    hasUpdate: !!latest && isNewerVersion(latest, cur),
-    checkedAt: Date.now()
-  };
-  await chrome.storage.local.set({ xccUpdate: info });
-  return info;
-}
-
-chrome.runtime.onStartup.addListener(() => checkUpdate());
-
-// ---------- storage ----------
-
-async function getSettings() {
-  const { settings } = await chrome.storage.local.get('settings');
-  return xccMergeSettings(settings);
-}
-
-async function updateSettings(patch) {
-  const next = { ...(await getSettings()), ...patch };
-  await chrome.storage.local.set({ settings: next });
-  return next;
-}
-
-// ---------- 提示词组装 ----------
+// ---------- 提示词组装（仅 GENERATE 使用） ----------
 
 function findPreset(list, id) {
   return list.find((p) => p.id === id) || list[0];
@@ -101,9 +46,10 @@ function buildMessages(s, req) {
   if (extra.length) prompt += (prompt ? '\n\n---\n' : '') + extra.join('\n\n');
 
   if (!prompt.trim()) {
-    prompt = tweetText || topic
-      ? '请针对以下内容写一条高质量、口语化的 X 回复：\n' + (tweetText || topic)
-      : '请写一条适合发布在 X 上的原创推文。';
+    prompt =
+      tweetText || topic
+        ? '请针对以下内容写一条高质量、口语化的 X 回复：\n' + (tweetText || topic)
+        : '请写一条适合发布在 X 上的原创推文。';
   }
 
   let sys = persona ? String(persona.persona) : '你是 X 平台上的活跃用户，表达自然。';
@@ -117,190 +63,29 @@ function buildMessages(s, req) {
   ];
 }
 
-function cleanOutput(text) {
-  let t = String(text || '').trim();
-  t = t.replace(/^```[a-zA-Z]*\s*\n?/, '').replace(/\n?```\s*$/, '');
-  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith('\u201c') && t.endsWith('\u201d'))) {
-    t = t.slice(1, -1);
-  }
-  return t.trim();
-}
-
-// ---------- 接入方式解析 ----------
-
-async function resolveProviderCfg(s) {
-  if (s.provider === 'xai') {
-    if (!s.xai.apiKey) throw new Error('尚未配置 xAI API Key，请打开设置页填写');
-    return { baseUrl: 'https://api.x.ai/v1', apiKey: s.xai.apiKey, model: s.xai.model };
-  }
-  if (s.provider === 'custom') {
-    if (!s.custom.baseUrl) throw new Error('尚未配置自定义接口地址，请打开设置页填写');
-    return { baseUrl: s.custom.baseUrl, apiKey: s.custom.apiKey || '', model: s.custom.model };
-  }
-  if (s.provider === 'grok-oauth') {
-    const o = s.grokOAuth;
-    if (!o.tokens || !o.tokens.access_token) {
-      throw new Error('Grok 尚未授权，请打开设置页完成账号登录');
-    }
-    let tokens = o.tokens;
-    if (!tokens.expires_at || Date.now() > tokens.expires_at - 60000) {
-      tokens = await refreshGrokToken(o);
-      await updateSettings({ grokOAuth: { ...o, tokens } });
-    }
-    return {
-      baseUrl: o.apiBase,
-      apiKey: tokens.access_token,
-      model: o.model,
-      // cli-chat-proxy.grok.com 依赖这三个头把请求识别为 grok CLI 客户端
-      extraHeaders: {
-        'x-grok-client-version': '0.2.101',
-        'x-grok-client-surface': 'grok-build',
-        'x-grok-client-mode': 'grok-shell'
-      }
-    };
-  }
-  throw new Error('未知的接入方式：' + s.provider);
-}
-
-async function chatCompletion(cfg, messages, genParams) {
-  const url = String(cfg.baseUrl || '').replace(/\/+$/, '') + '/chat/completions';
-  const body = {
-    model: cfg.model,
-    messages,
-    temperature: Number.isFinite(Number(genParams && genParams.temperature))
-      ? Number(genParams.temperature)
-      : 0.9,
-    max_tokens: Number.isFinite(Number(genParams && genParams.maxTokens))
-      ? Number(genParams.maxTokens)
-      : 400,
-    stream: false
-  };
-  let res;
-  try {
-    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey };
-    if (cfg.extraHeaders) Object.assign(headers, cfg.extraHeaders);
-    res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    });
-  } catch (e) {
-    throw new Error(
-      '网络请求失败（' + (e && e.message ? e.message : e) + '）。若为自定义接口，请检查地址与网络权限。'
-    );
-  }
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    throw new Error('API ' + res.status + '：' + t.slice(0, 300));
-  }
-  const data = await res.json().catch(() => null);
-  const text =
-    data && data.choices && data.choices[0] && data.choices[0].message
-      ? data.choices[0].message.content
-      : null;
-  if (!text) throw new Error('模型未返回内容：' + JSON.stringify(data).slice(0, 200));
-  return cleanOutput(text);
-}
-
-// ---------- Grok OAuth 设备流 ----------
-
-async function oauthRequest(url, params) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-    body: new URLSearchParams(params)
-  });
-  const text = await res.text();
-  let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch (e) {
-    /* 保留原始文本用于报错 */
-  }
-  return { ok: res.ok, status: res.status, data, text };
-}
-
-async function startDeviceAuth(o) {
-  if (!o.clientId) throw new Error('请先填写 Client ID（可从 grok CLI 开源仓库获取，见 README）');
-  const r = await oauthRequest(o.deviceEndpoint, {
-    client_id: o.clientId,
-    scope: o.scope || 'offline_access'
-  });
-  if (!r.ok) {
-    throw new Error(
-      '设备授权端点返回 ' + r.status + '：' + (r.text || '').slice(0, 200) +
-      '。请核对设置页中的端点地址与 Client ID。'
-    );
-  }
-  return r.data; // { device_code, user_code, verification_uri, expires_in, interval }
-}
-
-async function pollDeviceToken(o, device_code) {
-  const r = await oauthRequest(o.tokenEndpoint, {
-    grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-    client_id: o.clientId,
-    device_code
-  });
-  if (r.ok && r.data && r.data.access_token) {
-    const tokens = {
-      access_token: r.data.access_token,
-      refresh_token: r.data.refresh_token || '',
-      expires_at: Date.now() + (Number(r.data.expires_in) || 3600) * 1000 - 300000 // 提前 5 分钟视为过期
-    };
-    await updateSettings({ grokOAuth: { ...o, tokens } });
-    return { status: 'authorized' };
-  }
-  const err = r.data && r.data.error;
-  if (err === 'authorization_pending') return { status: 'pending' };
-  if (err === 'slow_down') return { status: 'pending', slow_down: true };
-  throw new Error('授权失败：' + (err || r.status + ' ' + (r.text || '').slice(0, 160)));
-}
-
-async function refreshGrokToken(o) {
-  if (!o.tokens || !o.tokens.refresh_token) throw new Error('Grok 授权已过期，请重新登录');
-  const r = await oauthRequest(o.tokenEndpoint, {
-    grant_type: 'refresh_token',
-    client_id: o.clientId,
-    refresh_token: o.tokens.refresh_token
-  });
-  if (r.ok && r.data && r.data.access_token) {
-    return {
-      access_token: r.data.access_token,
-      refresh_token: r.data.refresh_token || o.tokens.refresh_token,
-      expires_at: Date.now() + (Number(r.data.expires_in) || 3600) * 1000 - 300000
-    };
-  }
-  throw new Error('刷新 Grok 授权失败，请重新登录');
-}
-
-// ---------- 消息路由 ----------
-// 注意：GET_PUBLIC_SETTINGS / SAVE_ACTIVE 已移除——content/popup 直接读写
-// chrome.storage（common.js 的 xccMergeSettings/xccPublicSettings 本地计算），
-// 后台只负责必须走它的三件事：调模型、OAuth 设备流、更新检测。
+// ---------- 消息路由（GENERATE 为主；其余为兼容兜底） ----------
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     switch (msg && msg.type) {
       case 'GENERATE': {
-        const s = await getSettings();
-        const cfg = await resolveProviderCfg(s);
+        const s = await xccGetSettings();
+        const cfg = await xccResolveProviderCfg(s);
         const messages = buildMessages(s, msg);
-        const text = await chatCompletion(cfg, messages, s.genParams);
+        const text = await xccChatCompletion(cfg, messages, s.genParams);
         return sendResponse({ ok: true, text });
       }
       case 'OPEN_OPTIONS': {
-        // 设置按钮的兜底路径（正常路径是 content 直接 window.open 扩展页）
         chrome.runtime.openOptionsPage();
         return sendResponse({ ok: true });
       }
       case 'CHECK_UPDATE': {
-        const info = await checkUpdate();
-        return sendResponse({ ok: true, update: info });
+        return sendResponse({ ok: true, update: await xccCheckUpdate() });
       }
       case 'TEST_PROVIDER': {
-        const s = await getSettings();
-        const cfg = await resolveProviderCfg(s);
-        const text = await chatCompletion(
+        const s = await xccGetSettings();
+        const cfg = await xccResolveProviderCfg(s);
+        const text = await xccChatCompletion(
           cfg,
           [{ role: 'user', content: '这是一条连通性测试，请只回复：pong' }],
           { temperature: 0, maxTokens: 10 }
@@ -308,18 +93,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return sendResponse({ ok: true, text });
       }
       case 'OAUTH_START': {
-        const s = await getSettings();
-        const data = await startDeviceAuth(s.grokOAuth);
+        const s = await xccGetSettings();
+        const data = await xccStartDeviceAuth(s.grokOAuth);
         return sendResponse({ ok: true, ...data });
       }
       case 'OAUTH_POLL': {
-        const s = await getSettings();
-        const r = await pollDeviceToken(s.grokOAuth, msg.device_code);
-        return sendResponse({ ok: true, ...r });
+        const s = await xccGetSettings();
+        const r = await xccPollDeviceToken(s.grokOAuth, msg.device_code);
+        if (r.status === 'authorized' && r.tokens) {
+          await xccMutateSettings((m) => {
+            m.grokOAuth = { ...m.grokOAuth, tokens: r.tokens };
+          });
+        }
+        return sendResponse({ ok: true, status: r.status, slow_down: !!r.slow_down });
       }
       case 'OAUTH_LOGOUT': {
-        const s = await getSettings();
-        await updateSettings({ grokOAuth: { ...s.grokOAuth, tokens: null } });
+        await xccMutateSettings((m) => {
+          m.grokOAuth = { ...m.grokOAuth, tokens: null };
+        });
         return sendResponse({ ok: true });
       }
       default:
@@ -329,8 +120,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // 异步 sendResponse
 });
 
+chrome.runtime.onStartup.addListener(() => xccCheckUpdate());
+
 chrome.runtime.onInstalled.addListener(async () => {
   const { settings } = await chrome.storage.local.get('settings');
   if (!settings) await chrome.storage.local.set({ settings: XCC_DEFAULTS });
-  checkUpdate();
+  xccCheckUpdate();
 });

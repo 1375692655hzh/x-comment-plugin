@@ -24,11 +24,19 @@
     return new Promise((resolve) => {
       try {
         chrome.runtime.sendMessage(msg, (resp) => {
-          void chrome.runtime.lastError; // 扩展重载后静默降级
-          resolve(resp || null);
+          const le = chrome.runtime.lastError;
+          resolve(
+            resp || {
+              ok: false,
+              noBackend: true,
+              error: le && le.message
+                ? '后台不可用（' + String(le.message).slice(0, 80) + '）'
+                : '后台无响应'
+            }
+          );
         });
       } catch (e) {
-        resolve(null); // Extension context invalidated
+        resolve({ ok: false, noBackend: true, error: '扩展上下文已失效（扩展可能刚更新）' });
       }
     });
   }
@@ -112,7 +120,7 @@
       color: #fff; font-size: 14px; font-weight: 600;
       background: linear-gradient(135deg, #8b5cfa, #4f46e5);
     }
-    .xcc-gen-btn:disabled { opacity: .55; cursor: wait; }
+    .xcc-gen-btn:disabled { opacity: .55; cursor: not-allowed; }
     textarea.xcc-out {
       background: rgba(255,255,255,.04); color: #e7e9ea;
       border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
@@ -217,6 +225,18 @@
     if (prev && list.some((p) => p.id === prev)) sel.value = prev;
   }
 
+  // 生成按钮态：生成中 或 当前接入方式未配置完成 时禁用；
+  // ready 变化经 storage.onChanged → refreshSettings → applySettings 联动刷新
+  function syncGenBtn() {
+    const s = state.settings;
+    const ready = !!(s && s.ready && s.ready[s.provider]);
+    els.genBtn.disabled = state.generating || !ready;
+    els.genBtn.title = ready
+      ? ''
+      : '当前接入方式未配置完成（' + (s ? s.providerLabel : '模型') +
+        '）。点右上角 ⚙ 打开设置完成配置后再生成';
+  }
+
   function applySettings(pub) {
     state.settings = pub;
     const enabled = pub.enabled !== false;
@@ -235,6 +255,7 @@
     if (show) {
       els.update.textContent = '🆕 有新版 v' + upd.latest + '：点击下载 ZIP，解压替换后重新加载扩展';
     }
+    syncGenBtn();
   }
 
   async function refreshSettings() {
@@ -248,6 +269,13 @@
       };
       applySettings(pub);
     } catch (e) {
+      if (!(chrome.runtime && chrome.runtime.id)) {
+        // 本内容脚本属于重载前的旧实例：storage 已不可用，停止重试
+        els.provider.textContent = '⚠ 扩展已重新加载，请刷新本页（F5）后继续使用';
+        els.provider.classList.add('warn');
+        syncGenBtn();
+        return;
+      }
       if (!state.settings) {
         els.provider.textContent = '⚠ 设置读取失败：请在扩展管理页点「重新加载」后刷新页面';
         els.provider.classList.add('warn');
@@ -358,9 +386,24 @@
 
   async function generate() {
     if (state.generating) return;
+    // 兜底：正常情况按钮已被 syncGenBtn 禁用；拦截"换一条"与点击瞬间配置变化的竞态
+    const s = state.settings;
+    if (!(s && s.ready && s.ready[s.provider])) {
+      setStatus(
+        '尚未配置模型：点 ⚙ 打开设置完成「' + (s ? s.providerLabel : '模型接入') + '」后再生成',
+        true
+      );
+      return;
+    }
     const topic = els.topic.value.trim();
-    if (!state.captured && !topic) {
-      setStatus('请先捕获一条推文，或在下方输入主题', true);
+    const hasTweetText = !!(state.captured && String(state.captured.text || '').trim());
+    if (!hasTweetText && !topic) {
+      setStatus(
+        state.captured
+          ? '该推文没有可识别文本（仅图片/视频）：可改为在下方输入主题生成原创推文'
+          : '请先捕获一条推文，或在下方输入主题',
+        true
+      );
       return;
     }
     state.generating = true;
@@ -371,24 +414,22 @@
     // 避免生成等待期间误触捕获其他推文导致回错帖
     const target = state.captured;
     try {
-      // 生成是唯一必须走后台的链路，加超时兜底（后台被 Edge 休眠唤醒失败时不至于永远转圈）
       const r = await Promise.race([
         send({ type: 'GENERATE', tweet: target, topic: topic || null }),
-        sleep(60000).then(() => null)
+        sleep(XCC_GEN_TIMEOUT_MS).then(() => null)
       ]);
       if (r && r.ok) {
         els.out.value = r.text;
         state.generatedFor = target;
         setStatus('已生成，可编辑后填入');
+      } else if (!r) {
+        setStatus('生成超时：扩展后台未响应，请到扩展管理页「重新加载」扩展后刷新本页重试', true);
       } else {
-        setStatus(
-          (r && r.error) || '生成失败（扩展可能已更新，请刷新页面后重试）',
-          true
-        );
+        setStatus(r.error || '生成失败，请重试', true);
       }
     } finally {
       state.generating = false;
-      els.genBtn.disabled = false;
+      syncGenBtn(); // 不再无条件解禁：若配置仍为空则保持禁用
       els.genBtn.textContent = '✦ 生成';
     }
   }

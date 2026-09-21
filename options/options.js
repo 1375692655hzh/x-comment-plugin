@@ -1,4 +1,6 @@
-// X 评论副驾 — 设置页逻辑
+// X 评论副驾 — 设置页逻辑（v0.4.0）
+// 本页所有网络操作（OAuth 设备流/连通测试/更新检查）直接 fetch，
+// 不依赖 service worker；settings 写入统一走 xccMutateSettings（读最新→改→写回）。
 'use strict';
 
 const $ = (id) => document.getElementById(id);
@@ -6,34 +8,46 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let SETTINGS = null;
 
+// ---------- 孤儿页自愈 ----------
+// 扩展重载后，旧实例打开的设置页不会被关闭，只会被切断（Extension context
+// invalidated）：DOM 冻结在重载前状态（如过期横幅），chrome.* 调用全部抛错
+// （表现为按钮点了没反应、保存静默失败）。失效上下文中 chrome.runtime.id 为 undefined。
+function healOrphanPage(force) {
+  let dead = !!force;
+  try {
+    dead = dead || !(chrome.runtime && chrome.runtime.id);
+  } catch (e) {
+    dead = true;
+  }
+  if (!dead) return;
+  if (sessionStorage.getItem('xccHealTried')) {
+    // 已自愈一次仍失效（扩展可能已被移除）：给人工指引，避免刷新死循环
+    document.title = '页面已失效 · X 评论副驾';
+    document.body.innerHTML =
+      '<div style="font:14px/1.8 system-ui;max-width:540px;margin:80px auto;padding:0 16px;color:#333">' +
+      '扩展已重新加载，但本页面无法自动恢复。请关闭本标签，从 X 面板的 ⚙ 或工具栏图标重新打开设置页。</div>';
+    return;
+  }
+  sessionStorage.setItem('xccHealTried', '1');
+  location.reload(); // 解压目录重载后扩展 ID 不变，同 URL 从新实例加载
+}
+window.addEventListener('focus', healOrphanPage);
+document.addEventListener('visibilitychange', healOrphanPage);
+
 // ---------- 存储 ----------
-// 所有写入必须走 saveMutate（读最新值 → 改 → 写回）。
-// 不能拿页面打开时的快照整份覆盖，否则会把别处的更新回滚掉
-// （例如后台刚刷新的 OAuth token、弹窗里的开关、X 页面切换的预设）。
+
 async function loadSettings() {
-  const { settings } = await chrome.storage.local.get('settings');
-  SETTINGS = xccMergeSettings(settings);
+  SETTINGS = await xccGetSettings();
 }
 
-async function saveMutate(fn) {
-  const { settings } = await chrome.storage.local.get('settings');
-  const fresh = xccMergeSettings(settings);
-  fn(fresh);
-  await chrome.storage.local.set({ settings: fresh });
-  SETTINGS = fresh; // 保持本地快照与存储同步
-}
-
-function send(msg) {
-  return new Promise((resolve) => {
-    try {
-      chrome.runtime.sendMessage(msg, (resp) => {
-        void chrome.runtime.lastError;
-        resolve(resp || { ok: false, error: '后台无响应，请重载扩展' });
-      });
-    } catch (e) {
-      resolve({ ok: false, error: String(e) });
-    }
+// 页内串行化：快速连点两个保存不会交错丢写
+let saveChain = Promise.resolve();
+function saveMutate(fn) {
+  const run = saveChain.then(async () => {
+    SETTINGS = await xccMutateSettings(fn);
   });
+  saveChain = run.catch(() => {});
+  return run;
 }
 
 function toast(msg, isErr) {
@@ -84,8 +98,15 @@ function initProviderUI() {
 
   $('oauth-start').addEventListener('click', startOAuth);
   $('oauth-logout').addEventListener('click', async () => {
-    pollSeq++; // 取消进行中的轮询，避免旧轮询成功后把 token 写回
-    await send({ type: 'OAUTH_LOGOUT' });
+    pollSeq++; // 取消进行中的轮询
+    try {
+      await saveMutate((m) => {
+        m.grokOAuth = { ...m.grokOAuth, tokens: null };
+      });
+    } catch (e) {
+      toast('登出失败：' + (e && e.message ? e.message : e), true);
+      return;
+    }
     await loadSettings();
     fillOAuthInputs();
     renderOAuthStatus();
@@ -154,17 +175,23 @@ async function saveProvider(kind) {
     });
   }
   statusEl.textContent = '测试中…';
-  const r = await send({ type: 'TEST_PROVIDER' });
-  if (r.ok) {
+  try {
+    const cfg = await xccResolveProviderCfg(SETTINGS); // 本页直连，不依赖后台
+    await xccChatCompletion(
+      cfg,
+      [{ role: 'user', content: '这是一条连通性测试，请只回复：pong' }],
+      { temperature: 0, maxTokens: 10 }
+    );
     statusEl.textContent = '✓ 连通正常';
     toast('已保存，接口连通');
-  } else {
-    statusEl.textContent = '✗ ' + r.error;
-    toast('已保存，但测试失败：' + r.error, true);
+  } catch (e) {
+    const msg = e && e.message ? e.message : String(e);
+    statusEl.textContent = '✗ ' + msg;
+    toast('已保存，但测试失败：' + msg, true);
   }
 }
 
-// ---------- Grok OAuth 设备流 ----------
+// ---------- Grok OAuth 设备流（本页直连 auth.x.ai） ----------
 
 function renderOAuthStatus() {
   const t = SETTINGS.grokOAuth.tokens;
@@ -174,11 +201,11 @@ function renderOAuthStatus() {
   $('oauth-logout').hidden = !t;
 }
 
-// 每次开始授权/登出自增，使仍在运行的旧轮询循环失效：
-// 否则界面展示的是新设备码、实际轮询的却是旧 device_code
+// 每次开始授权/登出自增，使仍在运行的旧轮询循环失效
 let pollSeq = 0;
 
 async function startOAuth() {
+  const btn = $('oauth-start');
   const fields = readOAuthFields();
   if (!fields.clientId) {
     $('oauth-status').textContent = '✗ 请先填写 Client ID';
@@ -191,16 +218,23 @@ async function startOAuth() {
     m.grokOAuth = { ...m.grokOAuth, ...fields }; // tokens 等其余字段以存储最新值为准
   });
 
-  const r = await send({ type: 'OAUTH_START' });
-  if (!r.ok) {
-    $('oauth-status').textContent = '✗ ' + r.error;
+  btn.disabled = true;
+  btn.textContent = '发起中…';
+  let r;
+  try {
+    r = await xccStartDeviceAuth(SETTINGS.grokOAuth);
+  } catch (e) {
+    $('oauth-status').textContent = '✗ ' + (e && e.message ? e.message : e);
     return;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '开始授权';
   }
+
   const seq = ++pollSeq;
   $('oauth-area').hidden = false;
   $('oauth-code').textContent = r.user_code || '----';
   const link = $('oauth-link');
-  // 优先用带验证码的一步到位链接（verification_uri_complete）
   link.href = r.verification_uri_complete || r.verification_uri || '#';
   link.textContent = link.href;
   $('oauth-status').textContent = '已发起授权，等待登录…';
@@ -213,11 +247,20 @@ async function pollDevice(seq, device_code, interval, expires_in) {
   while (Date.now() < deadline) {
     await sleep(iv * 1000);
     if (seq !== pollSeq) return; // 已被新的授权流程或登出取代
-    const r = await send({ type: 'OAUTH_POLL', device_code });
+    let r;
+    try {
+      r = await xccPollDeviceToken(SETTINGS.grokOAuth, device_code);
+    } catch (e) {
+      if (seq === pollSeq) $('oauth-status').textContent = '✗ ' + (e && e.message ? e.message : e);
+      return;
+    }
     if (seq !== pollSeq) return;
-    if (r.ok && r.status === 'authorized') {
-      await loadSettings();
+    if (r.status === 'authorized') {
+      await saveMutate((m) => {
+        m.grokOAuth = { ...m.grokOAuth, tokens: r.tokens };
+      });
       if (seq !== pollSeq) return;
+      await loadSettings();
       fillOAuthInputs();
       renderOAuthStatus();
       $('oauth-area').hidden = true;
@@ -225,14 +268,7 @@ async function pollDevice(seq, device_code, interval, expires_in) {
       toast('Grok 授权成功');
       return;
     }
-    if (r.ok && r.status === 'pending') {
-      if (r.slow_down) iv = Math.min(iv + 5, 30); // RFC 8628：被限流时加大轮询间隔
-      continue;
-    }
-    if (!r.ok) {
-      $('oauth-status').textContent = '✗ ' + r.error;
-      return;
-    }
+    if (r.slow_down) iv = Math.min(iv + 5, 30); // RFC 8628：被限流时加大轮询间隔
   }
   if (seq === pollSeq) $('oauth-status').textContent = '授权超时，请重试';
 }
@@ -298,7 +334,6 @@ function presetCard(kind, p, isActive) {
     toast('已设为当前使用');
   });
 
-  // 按预设 id 在最新存储里定位后修改，不依赖页面快照里的对象引用
   saveB.addEventListener('click', async () => {
     const newName = name.value.trim() || p.name;
     const body = ta.value;
@@ -374,11 +409,10 @@ function initParamsUI() {
   });
 }
 
-// ---------- 更新检测 ----------
+// ---------- 更新检测（本页直连，不依赖后台） ----------
 
 function renderUpdateBanner(u) {
-  // 关键：显示时用「已装版本 vs 远端版本号」现场重算，不信存储里的 hasUpdate 旧结论，
-  // 否则升级完成后若后台没重跑检查，横幅会一直误报
+  // 显示时用「已装版本 vs 远端版本号」现场重算，不信存储里的 hasUpdate 旧结论
   const installed = chrome.runtime.getManifest().version;
   const has = !!(u && u.latest && xccIsNewerVersion(u.latest, installed));
   $('update-banner').hidden = !has;
@@ -389,19 +423,19 @@ function initUpdateBanner() {
   (async () => {
     const { xccUpdate } = await chrome.storage.local.get('xccUpdate');
     renderUpdateBanner(xccUpdate);
-    // 顺手触发一次新检查（后台不可用则静默跳过，显示逻辑不依赖它）
     try {
-      await Promise.race([send({ type: 'CHECK_UPDATE' }), sleep(4000)]);
-      const fresh = await chrome.storage.local.get('xccUpdate');
-      renderUpdateBanner(fresh.xccUpdate);
+      const info = await Promise.race([xccCheckUpdate(), sleep(8000).then(() => null)]);
+      if (info) renderUpdateBanner(info);
     } catch (e) {
       /* 检查失败不影响显示 */
     }
   })();
   $('update-open').addEventListener('click', () => window.open(XCC_ZIP_URL, '_blank'));
   $('update-check').addEventListener('click', async () => {
-    const r = await send({ type: 'CHECK_UPDATE' });
-    if (r.ok) renderUpdateBanner(r.update);
+    $('update-check').textContent = '检查中…';
+    const info = await xccCheckUpdate().catch(() => null);
+    $('update-check').textContent = '重新检查';
+    if (info) renderUpdateBanner(info);
     else {
       const { xccUpdate } = await chrome.storage.local.get('xccUpdate');
       renderUpdateBanner(xccUpdate);
@@ -412,9 +446,15 @@ function initUpdateBanner() {
 // ---------- 启动 ----------
 
 (async function init() {
-  await loadSettings();
-  initProviderUI();
-  initPresetUI();
-  initParamsUI();
-  initUpdateBanner();
+  healOrphanPage(); // 必须最先：孤儿页下后续所有 chrome.* 调用都会抛错
+  try {
+    await loadSettings();
+    initProviderUI();
+    initPresetUI();
+    initParamsUI();
+    initUpdateBanner();
+  } catch (e) {
+    if (/Extension context invalidated/i.test(String(e && e.message))) healOrphanPage(true);
+    else throw e;
+  }
 })();
