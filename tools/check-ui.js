@@ -32,6 +32,11 @@ const oh = read('options/options.html');
 const oj = read('options/options.js');
 const oids = new Set([...oj.matchAll(/\$\('([\w-]+)'\)/g)].map((m) => m[1]));
 for (const id of oids) check(oh.includes(`id="${id}"`), `options #${id} 存在`);
+// 3.5 oauth 模型控件门禁：必须是 select + 自定义输入（防退回 datalist 前缀过滤体验）
+check(/<select[^>]*id="oauth-model"/.test(oh), 'oauth-model 是 select');
+check(oh.includes('id="oauth-model-custom"'), '存在 #oauth-model-custom');
+check(!oh.includes('id="oauth-models"'), '已移除 datalist#oauth-models');
+check(oj.includes('XCC_OAUTH_MODEL_CUSTOM'), '自定义哨兵值存在');
 
 // 4. popup：popup.js 引用的每个 id 都在 popup.html 里
 const ph = read('popup/popup.html');

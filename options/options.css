@@ -62,6 +62,8 @@ code {
 .pi-body b { font-size: 13.5px; }
 .pi-body i { font-style: normal; font-size: 12px; color: var(--muted); }
 .provider-pane { border-top: 1px dashed var(--line); padding-top: 14px; }
+/* 「自定义 ID…」输入框展开时与上方 select 留出间距 */
+#oauth-model-custom { margin-top: 8px; }
 
 /* OAuth 授权 */
 .oauth-area {

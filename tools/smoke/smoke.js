@@ -313,7 +313,7 @@ const server = http.createServer((req, res) => {
       );
       if (pend) throw new Error('成功后 pending 未清除');
     });
-    await step('模型目录发现：授权后自动列出可用模型', async () => {
+    await step('模型目录发现：授权后自动填充 select', async () => {
       const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
       await optsPage.evaluate(async () => {
         const { settings } = await chrome.storage.local.get('settings');
@@ -322,12 +322,53 @@ const server = http.createServer((req, res) => {
       });
       await optsPage.reload();
       await optsPage.waitForFunction(
-        () => [...document.querySelectorAll('#oauth-models option')].some((o) => o.value === 'grok-4.6-discovered'),
+        () => [...document.querySelectorAll('#oauth-model option')].some((o) => o.value === 'grok-4.6-discovered'),
         null,
         { timeout: 15000 }
       );
       const txt = await optsPage.locator('#oauth-models-discovery').innerText();
       if (!txt.includes('3')) throw new Error('发现数异常: ' + txt);
+      const n = await optsPage.locator('#oauth-model option').count();
+      if (n < 7) throw new Error('发现+兜底合并异常: ' + n); // 3 发现 ∪ 5 兜底（重叠2）+ 当前值 + 自定义项
+    });
+    // 模型选择即时落盘（v0.4.1 问题回归门禁：改模型不再依赖「开始授权」）
+    await step('模型选择变更即时落盘，reload 后保持', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.locator('#oauth-model').selectOption('grok-4.6-discovered');
+      await optsPage.waitForTimeout(700); // change → saveMutate → storage
+      const saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.grokOAuth.model;
+      });
+      if (saved !== 'grok-4.6-discovered') throw new Error('未落盘: ' + saved);
+      await optsPage.reload(); // 模拟关页重开
+      await optsPage.waitForFunction(
+        () => document.getElementById('oauth-model').value === 'grok-4.6-discovered',
+        null,
+        { timeout: 15000 }
+      );
+    });
+    await step('自定义模型 ID 输入生效并落盘', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.locator('#oauth-model').selectOption('__custom__');
+      const custom = optsPage.locator('#oauth-model-custom');
+      await custom.waitFor({ state: 'visible' });
+      await custom.fill('grok-smoke-custom-id');
+      await custom.dispatchEvent('change');
+      await optsPage.waitForTimeout(700);
+      const saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.grokOAuth.model;
+      });
+      if (saved !== 'grok-smoke-custom-id') throw new Error('未落盘: ' + saved);
+      // 收尾：选回默认模型
+      await optsPage.locator('#oauth-model').selectOption('grok-4.3');
+      await optsPage.waitForTimeout(600);
+      const back = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.grokOAuth.model;
+      });
+      if (back !== 'grok-4.3') throw new Error('收尾回选失败: ' + back);
     });
     await step('OAuth 登出清除 token', async () => {
       const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));

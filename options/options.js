@@ -107,6 +107,11 @@ function initProviderUI() {
   $('xai-save').addEventListener('click', () => saveProvider('xai'));
   $('custom-save').addEventListener('click', () => saveProvider('custom'));
 
+  // 模型即选即存：单独换模型不再依赖「开始授权」才落盘
+  $('oauth-model').addEventListener('change', onOauthModelChange);
+  $('oauth-model-custom').addEventListener('change', onOauthModelCustomChange);
+  $('oauth-advanced-save').addEventListener('click', saveOauthAdvanced);
+
   $('oauth-start').addEventListener('click', startOAuth);
   $('oauth-logout').addEventListener('click', async () => {
     pollSeq++; // 取消进行中的轮询
@@ -133,17 +138,34 @@ function initProviderUI() {
 function fillOAuthInputs() {
   const o = SETTINGS.grokOAuth;
   $('oauth-client-id').value = o.clientId;
-  $('oauth-model').value = o.model;
   $('oauth-api-base').value = o.apiBase;
   $('oauth-device').value = o.deviceEndpoint;
   $('oauth-token').value = o.tokenEndpoint;
   $('oauth-scope').value = o.scope;
+  // select 必须重建选项后才能选中当前值（datalist 时代 input.value= 的迁移点）
+  renderOauthModels(XCC_OAUTH_MODEL_FALLBACK);
+}
+
+// select「自定义 ID…」选项的哨兵值（非真实模型 ID）
+const XCC_OAUTH_MODEL_CUSTOM = '__custom__';
+
+// select 当前值 → 模型 ID：选「自定义」时读输入框；为空则保底用已存模型
+function readOauthModelField() {
+  const sel = $('oauth-model');
+  if (sel.value === XCC_OAUTH_MODEL_CUSTOM) {
+    return (
+      $('oauth-model-custom').value.trim() ||
+      SETTINGS.grokOAuth.model ||
+      XCC_OAUTH_MODEL_FALLBACK[0]
+    );
+  }
+  return sel.value.trim();
 }
 
 function readOAuthFields() {
   return {
     clientId: $('oauth-client-id').value.trim(),
-    model: $('oauth-model').value.trim(),
+    model: readOauthModelField(),
     apiBase: $('oauth-api-base').value.trim(),
     deviceEndpoint: $('oauth-device').value.trim(),
     tokenEndpoint: $('oauth-token').value.trim(),
@@ -268,13 +290,37 @@ const XCC_OAUTH_MODEL_FALLBACK = [
   'grok-code-fast-1'
 ];
 
+// 重建模型下拉：传入候选 + 硬编码兜底 + 当前已存值 去重合并，末尾追加「自定义 ID…」。
+// 程序化 sel.value= 不触发 change，不会误写盘/误 toast。
 function renderOauthModels(models) {
-  const dl = $('oauth-models');
-  dl.textContent = '';
-  for (const m of models) {
+  const sel = $('oauth-model');
+  const custom = $('oauth-model-custom');
+  const cur = String(SETTINGS.grokOAuth.model || '').trim() || XCC_OAUTH_MODEL_FALLBACK[0];
+  const list = [...new Set([...models, ...XCC_OAUTH_MODEL_FALLBACK, cur])];
+  sel.textContent = '';
+  for (const m of list) {
     const opt = document.createElement('option');
     opt.value = m;
-    dl.appendChild(opt);
+    opt.textContent = m;
+    sel.appendChild(opt);
+  }
+  const customOpt = document.createElement('option');
+  customOpt.value = XCC_OAUTH_MODEL_CUSTOM;
+  customOpt.textContent = '自定义 ID…';
+  sel.appendChild(customOpt);
+  // 正在输入自定义 ID 时别打扰
+  if (document.activeElement === custom) {
+    sel.value = XCC_OAUTH_MODEL_CUSTOM;
+    return;
+  }
+  if (list.includes(cur)) {
+    sel.value = cur;
+    custom.hidden = true;
+  } else {
+    // 已存的是列表外自定义 ID：选中哨兵项并回填
+    sel.value = XCC_OAUTH_MODEL_CUSTOM;
+    custom.value = cur;
+    custom.hidden = false;
   }
 }
 
@@ -285,12 +331,67 @@ async function discoverGrokModels() {
   try {
     const discovered = await xccListGrokModels(o);
     if (discovered.length) {
-      renderOauthModels([...new Set([...discovered, ...XCC_OAUTH_MODEL_FALLBACK])]);
+      renderOauthModels(discovered); // 兜底与当前值在 renderOauthModels 内部合并
       $('oauth-models-discovery').textContent =
-        '已发现 ' + discovered.length + ' 个可用模型（也可直接手输任意模型 ID）';
+        '已发现 ' + discovered.length + ' 个可用模型（不在列表可选「自定义 ID…」）';
     }
   } catch (e) {
     /* 静默：端点不支持/不可达时保持硬编码候选 */
+  }
+}
+
+// ---------- OAuth 模型即时落盘 ----------
+// v0.4.1 教训：grokOAuth.model 原先只在「开始授权」时落盘，
+// 已授权用户单独改模型后关闭页面即丢，生成一直用旧模型。
+
+async function persistOauthModel(model) {
+  await saveMutate((m) => {
+    m.grokOAuth = { ...m.grokOAuth, model }; // 只写 model，不动 tokens
+  });
+  toast('模型已保存：' + model);
+}
+
+function onOauthModelChange() {
+  const sel = $('oauth-model');
+  const custom = $('oauth-model-custom');
+  if (sel.value === XCC_OAUTH_MODEL_CUSTOM) {
+    // 切到自定义：显示输入框并预填当前模型，输入完成（change）再落盘
+    custom.hidden = false;
+    custom.value = SETTINGS.grokOAuth.model || '';
+    custom.focus();
+    return;
+  }
+  custom.hidden = true;
+  persistOauthModel(sel.value).catch((e) => {
+    toast('模型保存失败：' + (e && e.message ? e.message : e), true);
+  });
+}
+
+function onOauthModelCustomChange() {
+  const v = $('oauth-model-custom').value.trim();
+  if (!v) {
+    toast('自定义模型 ID 不能为空，未保存', true);
+    return;
+  }
+  persistOauthModel(v).catch((e) => {
+    toast('模型保存失败：' + (e && e.message ? e.message : e), true);
+  });
+}
+
+// 高级字段（clientId/apiBase/device/token/scope）显式保存：
+// 原实现同样只在「开始授权」时顺带落盘，已授权用户改这些字段会被静默丢弃
+async function saveOauthAdvanced() {
+  const fields = readOAuthFields();
+  for (const ep of [fields.deviceEndpoint, fields.tokenEndpoint, fields.apiBase]) {
+    await requestOrigin(ep); // 换域名后补申请 host 权限（须在点击手势内）
+  }
+  try {
+    await saveMutate((m) => {
+      m.grokOAuth = { ...m.grokOAuth, ...fields }; // fields 不含 tokens，授权态不受影响
+    });
+    toast('高级设置已保存');
+  } catch (e) {
+    toast('高级设置保存失败：' + (e && e.message ? e.message : e), true);
   }
 }
 
