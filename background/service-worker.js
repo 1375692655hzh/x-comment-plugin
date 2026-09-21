@@ -109,8 +109,12 @@ async function chatCompletion(cfg, messages, genParams) {
   const body = {
     model: cfg.model,
     messages,
-    temperature: Number(genParams && genParams.temperature) || 0.9,
-    max_tokens: Number(genParams && genParams.maxTokens) || 400,
+    temperature: Number.isFinite(Number(genParams && genParams.temperature))
+      ? Number(genParams.temperature)
+      : 0.9,
+    max_tokens: Number.isFinite(Number(genParams && genParams.maxTokens))
+      ? Number(genParams.maxTokens)
+      : 400,
     stream: false
   };
   let res;
@@ -187,7 +191,8 @@ async function pollDeviceToken(o, device_code) {
     return { status: 'authorized' };
   }
   const err = r.data && r.data.error;
-  if (err === 'authorization_pending' || err === 'slow_down') return { status: 'pending' };
+  if (err === 'authorization_pending') return { status: 'pending' };
+  if (err === 'slow_down') return { status: 'pending', slow_down: true };
   throw new Error('授权失败：' + (err || r.status + ' ' + (r.text || '').slice(0, 160)));
 }
 
@@ -221,10 +226,11 @@ function publicSettings(s) {
     enabled: s.enabled !== false,
     provider: s.provider,
     providerLabel: label,
+    // 键名与 provider 的取值一致（xai / custom / grok-oauth），消费端用 pub.ready[pub.provider]
     ready: {
       xai: !!s.xai.apiKey,
-      custom: !!s.custom.baseUrl && !!s.custom.apiKey,
-      oauth: !!(s.grokOAuth.tokens && s.grokOAuth.tokens.access_token)
+      custom: !!s.custom.baseUrl, // Ollama 等本地无 Key 接口同样视为已配置
+      'grok-oauth': !!(s.grokOAuth.tokens && s.grokOAuth.tokens.access_token)
     },
     personaPresets: s.personaPresets,
     genPresets: s.genPresets,

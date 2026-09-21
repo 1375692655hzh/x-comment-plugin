@@ -7,13 +7,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let SETTINGS = null;
 
 // ---------- 存储 ----------
-
+// 所有写入必须走 saveMutate（读最新值 → 改 → 写回）。
+// 不能拿页面打开时的快照整份覆盖，否则会把别处的更新回滚掉
+// （例如后台刚刷新的 OAuth token、弹窗里的开关、X 页面切换的预设）。
 async function loadSettings() {
   const { settings } = await chrome.storage.local.get('settings');
   SETTINGS = xccMergeSettings(settings);
 }
-async function persist() {
-  await chrome.storage.local.set({ settings: SETTINGS });
+
+async function saveMutate(fn) {
+  const { settings } = await chrome.storage.local.get('settings');
+  const fresh = xccMergeSettings(settings);
+  fn(fresh);
+  await chrome.storage.local.set({ settings: fresh });
+  SETTINGS = fresh; // 保持本地快照与存储同步
 }
 
 function send(msg) {
@@ -51,13 +58,15 @@ function initProviderUI() {
     r.closest('.provider-item').classList.toggle('checked', r.checked);
     r.addEventListener('change', async () => {
       if (!r.checked) return;
-      SETTINGS.provider = r.value;
-      await persist();
+      const value = r.value;
+      await saveMutate((m) => {
+        m.provider = value;
+      });
       document.querySelectorAll('.provider-item').forEach((it) =>
         it.classList.toggle('checked', it.contains(r))
       );
       togglePanes();
-      toast('已切换接入方式：' + r.value);
+      toast('已切换接入方式：' + value);
     });
   });
 
@@ -75,10 +84,13 @@ function initProviderUI() {
 
   $('oauth-start').addEventListener('click', startOAuth);
   $('oauth-logout').addEventListener('click', async () => {
+    pollSeq++; // 取消进行中的轮询，避免旧轮询成功后把 token 写回
     await send({ type: 'OAUTH_LOGOUT' });
     await loadSettings();
     fillOAuthInputs();
     renderOAuthStatus();
+    $('oauth-area').hidden = true;
+    $('oauth-status').textContent = '已登出';
     toast('已登出 Grok 授权');
   });
 }
@@ -93,9 +105,8 @@ function fillOAuthInputs() {
   $('oauth-scope').value = o.scope;
 }
 
-function collectOAuthFields() {
-  SETTINGS.grokOAuth = {
-    ...SETTINGS.grokOAuth,
+function readOAuthFields() {
+  return {
     clientId: $('oauth-client-id').value.trim(),
     model: $('oauth-model').value.trim(),
     apiBase: $('oauth-api-base').value.trim(),
@@ -118,26 +129,30 @@ async function requestOrigin(url) {
 async function saveProvider(kind) {
   const statusEl = $(kind + '-status');
   if (kind === 'xai') {
-    SETTINGS.xai = {
+    const xai = {
       apiKey: $('xai-key').value.trim(),
       model: $('xai-model').value.trim() || 'grok-4-fast-non-reasoning'
     };
+    await saveMutate((m) => {
+      m.xai = xai;
+    });
   } else {
     const baseUrl = $('custom-base').value.trim();
     if (!baseUrl) {
       statusEl.textContent = '✗ 请填写接口地址';
       return;
     }
-    SETTINGS.custom = {
-      baseUrl,
-      apiKey: $('custom-key').value.trim(),
-      model: $('custom-model').value.trim() || 'gpt-4o-mini'
-    };
-    // 自定义域名不在 manifest host_permissions 内，需用户点一下授权
+    // 权限申请要在按钮手势内最先做（自定义域名不在 manifest 静态授权里）
     const granted = await requestOrigin(baseUrl);
     if (!granted) statusEl.textContent = '⚠ 未授予网络权限，调用可能被浏览器拦截';
+    await saveMutate((m) => {
+      m.custom = {
+        baseUrl,
+        apiKey: $('custom-key').value.trim(),
+        model: $('custom-model').value.trim() || 'gpt-4o-mini'
+      };
+    });
   }
-  await persist();
   statusEl.textContent = '测试中…';
   const r = await send({ type: 'TEST_PROVIDER' });
   if (r.ok) {
@@ -159,63 +174,66 @@ function renderOAuthStatus() {
   $('oauth-logout').hidden = !t;
 }
 
-let oauthPolling = false;
+// 每次开始授权/登出自增，使仍在运行的旧轮询循环失效：
+// 否则界面展示的是新设备码、实际轮询的却是旧 device_code
+let pollSeq = 0;
 
 async function startOAuth() {
-  collectOAuthFields();
-  if (!SETTINGS.grokOAuth.clientId) {
+  const fields = readOAuthFields();
+  if (!fields.clientId) {
     $('oauth-status').textContent = '✗ 请先填写 Client ID';
     return;
   }
-  for (const ep of [
-    SETTINGS.grokOAuth.deviceEndpoint,
-    SETTINGS.grokOAuth.tokenEndpoint,
-    SETTINGS.grokOAuth.apiBase
-  ]) {
+  for (const ep of [fields.deviceEndpoint, fields.tokenEndpoint, fields.apiBase]) {
     await requestOrigin(ep);
   }
-  await persist();
+  await saveMutate((m) => {
+    m.grokOAuth = { ...m.grokOAuth, ...fields }; // tokens 等其余字段以存储最新值为准
+  });
 
   const r = await send({ type: 'OAUTH_START' });
   if (!r.ok) {
     $('oauth-status').textContent = '✗ ' + r.error;
     return;
   }
+  const seq = ++pollSeq;
   $('oauth-area').hidden = false;
   $('oauth-code').textContent = r.user_code || '----';
   const link = $('oauth-link');
   link.href = r.verification_uri || '#';
   link.textContent = r.verification_uri || '';
   $('oauth-status').textContent = '已发起授权，等待登录…';
-  pollDevice(r.device_code, r.interval || 5, r.expires_in || 600);
+  pollDevice(seq, r.device_code, r.interval || 5, r.expires_in || 600);
 }
 
-async function pollDevice(device_code, interval, expires_in) {
-  if (oauthPolling) return;
-  oauthPolling = true;
+async function pollDevice(seq, device_code, interval, expires_in) {
   const deadline = Date.now() + expires_in * 1000;
-  try {
-    while (Date.now() < deadline) {
-      await sleep(Math.max(2, interval) * 1000);
-      const r = await send({ type: 'OAUTH_POLL', device_code });
-      if (r.ok && r.status === 'authorized') {
-        $('oauth-area').hidden = true;
-        $('oauth-status').textContent = '✓ 授权成功，可以使用 Grok 模型了';
-        await loadSettings();
-        fillOAuthInputs();
-        renderOAuthStatus();
-        toast('Grok 授权成功');
-        return;
-      }
-      if (!r.ok) {
-        $('oauth-status').textContent = '✗ ' + r.error;
-        return;
-      }
+  let iv = Math.max(2, interval);
+  while (Date.now() < deadline) {
+    await sleep(iv * 1000);
+    if (seq !== pollSeq) return; // 已被新的授权流程或登出取代
+    const r = await send({ type: 'OAUTH_POLL', device_code });
+    if (seq !== pollSeq) return;
+    if (r.ok && r.status === 'authorized') {
+      await loadSettings();
+      if (seq !== pollSeq) return;
+      fillOAuthInputs();
+      renderOAuthStatus();
+      $('oauth-area').hidden = true;
+      $('oauth-status').textContent = '✓ 授权成功，可以使用 Grok 模型了';
+      toast('Grok 授权成功');
+      return;
     }
-    $('oauth-status').textContent = '授权超时，请重试';
-  } finally {
-    oauthPolling = false;
+    if (r.ok && r.status === 'pending') {
+      if (r.slow_down) iv = Math.min(iv + 5, 30); // RFC 8628：被限流时加大轮询间隔
+      continue;
+    }
+    if (!r.ok) {
+      $('oauth-status').textContent = '✗ ' + r.error;
+      return;
+    }
   }
+  if (seq === pollSeq) $('oauth-status').textContent = '授权超时，请重试';
 }
 
 // ---------- 提示词管理 ----------
@@ -266,35 +284,48 @@ function presetCard(kind, p, isActive) {
   }
   card.append(head, ta);
 
+  const listKey = kind === 'persona' ? 'personaPresets' : 'genPresets';
+  const bodyKey = kind === 'persona' ? 'persona' : 'prompt';
+  const actKey = kind === 'persona' ? 'activePersonaId' : 'activeGenId';
+
   radio.addEventListener('change', async () => {
     if (!radio.checked) return;
-    if (kind === 'persona') SETTINGS.activePersonaId = p.id;
-    else SETTINGS.activeGenId = p.id;
-    await persist();
+    await saveMutate((m) => {
+      m[actKey] = p.id;
+    });
     renderPresets();
     toast('已设为当前使用');
   });
 
+  // 按预设 id 在最新存储里定位后修改，不依赖页面快照里的对象引用
   saveB.addEventListener('click', async () => {
-    p.name = name.value.trim() || p.name;
-    if (kind === 'persona') p.persona = ta.value;
-    else p.prompt = ta.value;
-    await persist();
+    const newName = name.value.trim() || p.name;
+    const body = ta.value;
+    await saveMutate((m) => {
+      const t = m[listKey].find((x) => x.id === p.id);
+      if (t) {
+        t.name = newName;
+        t[bodyKey] = body;
+      }
+    });
     renderPresets();
     toast('已保存');
   });
 
   delB.addEventListener('click', async () => {
-    const key = kind === 'persona' ? 'personaPresets' : 'genPresets';
-    if (SETTINGS[key].length <= 1) {
+    if (!confirm('删除「' + p.name + '」？')) return;
+    let removed = false;
+    await saveMutate((m) => {
+      const next = m[listKey].filter((x) => x.id !== p.id);
+      if (!next.length) return; // 至少保留一个
+      m[listKey] = next;
+      if (m[actKey] === p.id) m[actKey] = next[0].id;
+      removed = true;
+    });
+    if (!removed) {
       toast('至少保留一个预设', true);
       return;
     }
-    if (!confirm('删除「' + p.name + '」？')) return;
-    SETTINGS[key] = SETTINGS[key].filter((x) => x.id !== p.id);
-    const actKey = kind === 'persona' ? 'activePersonaId' : 'activeGenId';
-    if (SETTINGS[actKey] === p.id) SETTINGS[actKey] = SETTINGS[key][0].id;
-    await persist();
     renderPresets();
     toast('已删除');
   });
@@ -304,17 +335,15 @@ function presetCard(kind, p, isActive) {
 
 function initPresetUI() {
   $('add-persona').addEventListener('click', async () => {
-    SETTINGS.personaPresets.push({ id: xccUid('p'), name: '新人设', persona: '你是……' });
-    await persist();
+    await saveMutate((m) => {
+      m.personaPresets.push({ id: xccUid('p'), name: '新人设', persona: '你是……' });
+    });
     renderPresets();
   });
   $('add-gen').addEventListener('click', async () => {
-    SETTINGS.genPresets.push({
-      id: xccUid('g'),
-      name: '新风格',
-      prompt: '针对 {tweet_text} 写一条……'
+    await saveMutate((m) => {
+      m.genPresets.push({ id: xccUid('g'), name: '新风格', prompt: '针对 {tweet_text} 写一条……' });
     });
-    await persist();
     renderPresets();
   });
   renderPresets();
@@ -329,12 +358,16 @@ function initParamsUI() {
   $('lang').value = SETTINGS.genParams.language;
   $('temp').addEventListener('input', () => ($('temp-val').textContent = $('temp').value));
   $('params-save').addEventListener('click', async () => {
-    SETTINGS.genParams = {
-      temperature: parseFloat($('temp').value) || 0.9,
-      maxTokens: parseInt($('maxtok').value, 10) || 400,
+    const temp = parseFloat($('temp').value);
+    const mt = parseInt($('maxtok').value, 10);
+    const params = {
+      temperature: Number.isFinite(temp) ? Math.min(1.5, Math.max(0, temp)) : 0.9,
+      maxTokens: Number.isFinite(mt) ? Math.min(2000, Math.max(50, mt)) : 400,
       language: $('lang').value
     };
-    await persist();
+    await saveMutate((m) => {
+      m.genParams = params;
+    });
     $('params-status').textContent = '✓ 已保存';
     toast('参数已保存');
   });

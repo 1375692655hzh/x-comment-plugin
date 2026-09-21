@@ -11,7 +11,8 @@
 
   const state = {
     settings: null,
-    captured: null, // { author, name, text, href }
+    captured: null, // { author, name, text, href } 当前捕获的推文
+    generatedFor: null, // 生成结果对应的推文快照（防止回错帖）
     generating: false
   };
 
@@ -70,6 +71,8 @@
       box-shadow: 0 12px 40px rgba(0,0,0,.5);
       display: flex; flex-direction: column; gap: 8px;
     }
+    /* .xcc-panel 的 display:flex 会盖掉浏览器默认的 [hidden]{display:none}，必须显式声明 */
+    .xcc-panel[hidden] { display: none; }
     .xcc-head { display: flex; align-items: center; justify-content: space-between; }
     .xcc-title { font-weight: 700; font-size: 14px; }
     .xcc-mini {
@@ -232,9 +235,14 @@
 
   let hoverArticle = null;
 
+  function isEnabled() {
+    return !!(state.settings && state.settings.enabled !== false);
+  }
+
   document.addEventListener(
     'mouseover',
     (e) => {
+      if (!isEnabled()) return;
       const t = e.target;
       if (!(t instanceof Element)) return;
       if (t.closest('#xcc-host')) return; // 我们自己的 UI
@@ -266,7 +274,7 @@
 
   els.hoverBtn.addEventListener('click', (ev) => {
     ev.stopPropagation();
-    if (!hoverArticle) return;
+    if (!hoverArticle || !isEnabled()) return;
     captureTweet(hoverArticle);
     els.panel.hidden = false;
     refreshSettings();
@@ -318,10 +326,14 @@
     els.genBtn.disabled = true;
     els.genBtn.textContent = '生成中…';
     setStatus('正在生成…');
+    // 快照本次生成的目标推文：填入时绑定它，
+    // 避免生成等待期间误触捕获其他推文导致回错帖
+    const target = state.captured;
     try {
-      const r = await send({ type: 'GENERATE', tweet: state.captured, topic: topic || null });
+      const r = await send({ type: 'GENERATE', tweet: target, topic: topic || null });
       if (r && r.ok) {
         els.out.value = r.text;
+        state.generatedFor = target;
         setStatus('已生成，可编辑后填入');
       } else {
         setStatus(
@@ -344,12 +356,19 @@
     ).filter((el) => el.offsetParent !== null);
   }
 
+  // 推文详情页的回复框是常驻内联的（点回复不会新增 DOM 节点），
+  // 短暂等待新编辑器未果且确在详情页时，退回使用已可见的那个，避免白等 6 秒
+  function isDetailPage() {
+    return /\/status\/\d+/.test(location.pathname);
+  }
+
   async function waitForNewEditor(beforeSet, timeout) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeout) {
       const eds = visibleEditors();
       const fresh = eds.find((e) => !beforeSet.has(e));
       if (fresh) return fresh;
+      if (eds.length && isDetailPage() && Date.now() - t0 > 1200) return eds[eds.length - 1];
       await sleep(120);
     }
     return null;
@@ -374,19 +393,19 @@
     }
   }
 
-  function cssEscape(s) {
-    try {
-      return CSS.escape(s);
-    } catch (e) {
-      return s.replace(/["\\]/g, '\\$&');
-    }
+  // 每条推文自己的永久链接 = 时间戳外层的 <a>；
+  // 只按它精确定位，避免误命中推文内引用转发（quote tweet）的链接
+  function articlePermalink(art) {
+    const time = art.querySelector('a[href*="/status/"] time');
+    const a = time && time.closest('a');
+    return a ? (a.getAttribute('href') || '').split('?')[0] : '';
   }
 
   function findArticleByHref(href) {
     const clean = href.split('?')[0];
     if (!clean) return null;
     for (const a of document.querySelectorAll('article[data-testid="tweet"]')) {
-      if (a.querySelector('a[href*="' + cssEscape(clean) + '"]')) return a;
+      if (articlePermalink(a) === clean) return a;
     }
     return null;
   }
@@ -397,9 +416,11 @@
       setStatus('还没有内容可填入', true);
       return;
     }
-    if (state.captured && state.captured.href) {
-      // 回复模式：找到原推文 → 点回复按钮 → 等新编辑器出现 → 写入
-      const art = findArticleByHref(state.captured.href);
+    // 结果绑定生成时的推文；纯手写内容（从未生成过）才用当前捕获
+    const target = state.generatedFor || state.captured;
+    if (target && target.href) {
+      // 回复模式：找到原推文 → 点回复按钮 → 等编辑器出现 → 写入
+      const art = findArticleByHref(target.href);
       if (!art) {
         setStatus('页面上找不到原推文（可能已滚出屏幕），请滚回该推文附近再试', true);
         return;
@@ -418,8 +439,13 @@
         return;
       }
       const ok = insertInto(editor, text);
-      if (ok) setStatus('✓ 已填入回复框，检查后手动点发送');
-      else {
+      if (ok) {
+        setStatus(
+          target !== state.captured
+            ? '✓ 已按生成时的推文（' + (target.author || '') + '）填入，检查后手动发送'
+            : '✓ 已填入回复框，检查后手动点发送'
+        );
+      } else {
         setStatus('填入失败，内容已复制，请手动粘贴', true);
         copyText(text);
       }
@@ -461,6 +487,7 @@
       els.panel.hidden = true;
     } else if (act === 'clear') {
       state.captured = null;
+      state.generatedFor = null;
       renderTweetBox();
       setStatus('');
     } else if (act === 'insert') {
