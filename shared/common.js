@@ -14,16 +14,17 @@ const XCC_DEFAULTS = {
 
   custom: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
 
-  // Grok 账号授权（OAuth 2.0 Device Flow，与 grok CLI 同款登录方式）。
-  // 端点与 client_id 若与 grok CLI 开源仓库中的最新实现不一致，
-  // 请在设置页更正（详见 README「Grok 账号授权」一节）。
+  // Grok 账号授权（OAuth 2.0 Device Flow，grok CLI 同款）。
+  // 端点与公开 client_id 取自 xai-org/grok-build 开源实现（社区包 @piex-dev/xai-oauth 同款），
+  // 已实测可用：授权服务器 auth.x.ai；订阅额度（SuperGrok / X Premium+）的对话调用
+  // 走 cli-chat-proxy.grok.com，需带 x-grok-client-* 请求头（见 service-worker.js）。
   grokOAuth: {
-    clientId: '',
-    apiBase: 'https://api.x.ai/v1',
-    deviceEndpoint: 'https://accounts.x.ai/oauth2/device/code',
-    tokenEndpoint: 'https://accounts.x.ai/oauth2/token',
-    scope: 'offline_access',
-    model: 'grok-4-fast-non-reasoning',
+    clientId: 'b1a00492-073a-47ea-816f-4c329264a828',
+    deviceEndpoint: 'https://auth.x.ai/oauth2/device/code',
+    tokenEndpoint: 'https://auth.x.ai/oauth2/token',
+    scope: 'openid profile email offline_access grok-cli:access api:access',
+    apiBase: 'https://cli-chat-proxy.grok.com/v1',
+    model: 'grok-4.3',
     tokens: null // { access_token, refresh_token, expires_at }
   },
 
@@ -92,12 +93,17 @@ const XCC_DEFAULTS = {
 // 把 chrome.storage.local 中保存的 settings 合并到默认值上（兼容旧版本缺字段）
 function xccMergeSettings(saved) {
   const s = saved || {};
+  // 旧版本（v0.1.x）预填的是 accounts.x.ai 错误端点且 clientId 为空：
+  // 用户从未定制/授权过时，整体采用 v0.2 的新默认值；有 token 时保留原值不动
+  const g = s.grokOAuth || {};
+  const grokOAuth =
+    !g.tokens && !g.clientId ? XCC_DEFAULTS.grokOAuth : { ...XCC_DEFAULTS.grokOAuth, ...g };
   return {
     ...XCC_DEFAULTS,
     ...s,
     xai: { ...XCC_DEFAULTS.xai, ...(s.xai || {}) },
     custom: { ...XCC_DEFAULTS.custom, ...(s.custom || {}) },
-    grokOAuth: { ...XCC_DEFAULTS.grokOAuth, ...(s.grokOAuth || {}) },
+    grokOAuth,
     genParams: { ...XCC_DEFAULTS.genParams, ...(s.genParams || {}) },
     personaPresets:
       Array.isArray(s.personaPresets) && s.personaPresets.length

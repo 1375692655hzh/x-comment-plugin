@@ -56,11 +56,15 @@ x-comment-plugin/
 
 保存时会请求该域名的网络权限（MV3 要求），点允许即可。
 
-### 方式三：Grok 账号授权（Beta）
+### 方式三：Grok 账号授权（SuperGrok / X Premium+ 订阅额度）
 
-与 grok CLI 同款的 OAuth 2.0 设备码流程：点「保存并开始授权」→ 打开显示的链接 → 输入 4-8 位代码完成登录 → 扩展自动拿到 token，之后调用走你的账号额度。
+与 grok CLI 同款的 OAuth 2.0 设备码登录，模型调用走订阅额度、不消耗 API Key：
 
-**注意**：设备流需要两样东西——`Client ID` 与 `device/token 端点`。扩展已按标准 Device Flow 实现，端点默认预填 `accounts.x.ai`；grok CLI 是开源项目，若端点或公开 Client ID 与预填值不一致（表现为 404 / invalid_client），请到 grok CLI 的开源仓库核对最新值后填入设置页「高级」折叠项。API Key 方式不受此影响。
+1. 设置页选「Grok 账号授权」→ 点「**开始授权**」（无需填写任何 ID）
+2. 点击面板里显示的链接（已自动带上验证码）→ 登录 xAI 账号 → 点允许
+3. 设置页自动显示「✓ 授权成功」，之后生成即走订阅额度
+
+技术说明：端点与公开 Client ID 取自 [xai-org/grok-build](https://github.com/xai-org/grok-build) 开源实现（社区包 `@piex-dev/xai-oauth` 同款），并经真实请求验证——授权服务器为 `auth.x.ai`（OIDC discovery 可查），订阅对话调用走 `cli-chat-proxy.grok.com/v1` 并携带 `x-grok-client-*` 识别头。默认模型 `grok-4.3`，可换 `grok-4.5`、`grok-composer-2.5-fast` 等。若 xAI 调整端点，在设置页「高级」中更正即可。
 
 ## 使用
 

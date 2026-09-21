@@ -200,8 +200,9 @@ async function startOAuth() {
   $('oauth-area').hidden = false;
   $('oauth-code').textContent = r.user_code || '----';
   const link = $('oauth-link');
-  link.href = r.verification_uri || '#';
-  link.textContent = r.verification_uri || '';
+  // 优先用带验证码的一步到位链接（verification_uri_complete）
+  link.href = r.verification_uri_complete || r.verification_uri || '#';
+  link.textContent = link.href;
   $('oauth-status').textContent = '已发起授权，等待登录…';
   pollDevice(seq, r.device_code, r.interval || 5, r.expires_in || 600);
 }

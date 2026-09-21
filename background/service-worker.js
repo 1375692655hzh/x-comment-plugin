@@ -99,7 +99,17 @@ async function resolveProviderCfg(s) {
       tokens = await refreshGrokToken(o);
       await updateSettings({ grokOAuth: { ...o, tokens } });
     }
-    return { baseUrl: o.apiBase, apiKey: tokens.access_token, model: o.model };
+    return {
+      baseUrl: o.apiBase,
+      apiKey: tokens.access_token,
+      model: o.model,
+      // cli-chat-proxy.grok.com 依赖这三个头把请求识别为 grok CLI 客户端
+      extraHeaders: {
+        'x-grok-client-version': '0.2.101',
+        'x-grok-client-surface': 'grok-build',
+        'x-grok-client-mode': 'grok-shell'
+      }
+    };
   }
   throw new Error('未知的接入方式：' + s.provider);
 }
@@ -119,9 +129,11 @@ async function chatCompletion(cfg, messages, genParams) {
   };
   let res;
   try {
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey };
+    if (cfg.extraHeaders) Object.assign(headers, cfg.extraHeaders);
     res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey },
+      headers,
       body: JSON.stringify(body)
     });
   } catch (e) {
@@ -185,7 +197,7 @@ async function pollDeviceToken(o, device_code) {
     const tokens = {
       access_token: r.data.access_token,
       refresh_token: r.data.refresh_token || '',
-      expires_at: Date.now() + (Number(r.data.expires_in) || 3600) * 1000
+      expires_at: Date.now() + (Number(r.data.expires_in) || 3600) * 1000 - 300000 // 提前 5 分钟视为过期
     };
     await updateSettings({ grokOAuth: { ...o, tokens } });
     return { status: 'authorized' };
@@ -207,7 +219,7 @@ async function refreshGrokToken(o) {
     return {
       access_token: r.data.access_token,
       refresh_token: r.data.refresh_token || o.tokens.refresh_token,
-      expires_at: Date.now() + (Number(r.data.expires_in) || 3600) * 1000
+      expires_at: Date.now() + (Number(r.data.expires_in) || 3600) * 1000 - 300000
     };
   }
   throw new Error('刷新 Grok 授权失败，请重新登录');

@@ -23,7 +23,7 @@
       </label>
       <label class="provider-item">
         <input type="radio" name="provider" value="grok-oauth">
-        <span class="pi-body"><b>Grok 账号授权（Beta）</b><i>grok CLI 同款设备码登录，走账号额度</i></span>
+        <span class="pi-body"><b>Grok 账号授权（订阅额度）</b><i>SuperGrok / X Premium+ 订阅登录，与 grok CLI 同款</i></span>
       </label>
     </div>
 
@@ -59,24 +59,34 @@
     </div>
 
     <div class="provider-pane" id="pane-oauth" hidden>
-      <div class="field"><label>Client ID</label>
-        <input id="oauth-client-id" placeholder="从 grok CLI 开源仓库获取（见 README）"></div>
+      <p class="hint">用你的 SuperGrok / X Premium+ 订阅额度跑模型（不消耗 API Key）：
+        点下方按钮 → 打开授权链接登录 xAI 账号并允许 → 此页自动完成。<b>无需填写任何 ID</b>，
+        插件已内置 grok CLI 同款公开客户端与端点。</p>
       <div class="field"><label>模型</label>
-        <input id="oauth-model" list="xai-models"></div>
+        <input id="oauth-model" list="oauth-models">
+        <datalist id="oauth-models">
+          <option value="grok-4.3"></option>
+          <option value="grok-4.5"></option>
+          <option value="grok-composer-2.5-fast"></option>
+          <option value="grok-3-fast"></option>
+          <option value="grok-code-fast-1"></option>
+        </datalist>
+      </div>
       <details>
-        <summary class="hint">高级：端点与权限（端点有变时在此更正）</summary>
-        <div class="field"><label>API Base</label><input id="oauth-api-base"></div>
+        <summary class="hint">高级：Client ID 与端点（已预填官方公开值，一般不用改）</summary>
+        <div class="field"><label>Client ID</label><input id="oauth-client-id"></div>
+        <div class="field"><label>API Base（订阅额度走 cli-chat-proxy）</label><input id="oauth-api-base"></div>
         <div class="field"><label>Device 端点</label><input id="oauth-device"></div>
         <div class="field"><label>Token 端点</label><input id="oauth-token"></div>
         <div class="field"><label>Scope</label><input id="oauth-scope"></div>
       </details>
       <div class="row">
-        <button class="primary" id="oauth-start">保存并开始授权</button>
+        <button class="primary" id="oauth-start">开始授权</button>
         <button id="oauth-logout" hidden>登出</button>
         <span class="hint" id="oauth-status"></span>
       </div>
       <div class="oauth-area" id="oauth-area" hidden>
-        <p>请打开下方链接，输入该代码完成登录授权：</p>
+        <p>点击下方链接直达授权页（已自动带上验证码），登录并点击允许：</p>
         <div class="oauth-code" id="oauth-code">----</div>
         <a id="oauth-link" target="_blank" rel="noreferrer"></a>
         <p class="hint">等待授权中，此页面请保持打开…</p>
