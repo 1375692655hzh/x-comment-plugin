@@ -228,17 +228,13 @@ async function xccChatCompletion(cfg, messages, genParams) {
   try {
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey };
     if (cfg.extraHeaders) Object.assign(headers, cfg.extraHeaders);
-    // 45s < content 端 60s 兜底：挂起的上游先变成可读错误，而不是被误报成"后台未响应"
+    // 不设超时：慢模型/深推理由用户自行判断（面板可随时放弃等待）
     res = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(45000)
+      body: JSON.stringify(body)
     });
   } catch (e) {
-    if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
-      throw new Error('上游 45 秒无响应：该模型可能不在你账号的可用列表，或推理模型思考过久（可把思考强度设为 low）');
-    }
     throw new Error(
       '网络请求失败（' + (e && e.message ? e.message : e) + '）。若为自定义接口，请检查地址与网络权限。'
     );

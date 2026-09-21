@@ -129,9 +129,6 @@ function xccUid(prefix) {
 const XCC_ZIP_URL =
   'https://github.com/1375692655hzh/x-comment-plugin/archive/refs/heads/main.zip';
 
-// 生成兜底超时：后台未响应时不永远转圈（content.js 使用）
-const XCC_GEN_TIMEOUT_MS = 60000;
-
 // 版本比较：a 是否大于 b（点分数字逐段比较）
 function xccIsNewerVersion(a, b) {
   const pa = String(a).split('.').map(Number);

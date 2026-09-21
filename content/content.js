@@ -14,7 +14,8 @@
     captured: null, // { author, name, text, href } 当前捕获的推文
     generatedFor: null, // 生成结果对应的推文快照（防止回错帖）
     generating: false,
-    inserting: false // 填入进行中：防双击竞态
+    inserting: false, // 填入进行中：防双击竞态
+    genCancel: null // 生成中点按钮触发的"放弃等待"回调
   };
 
   // ---------- 基础工具 ----------
@@ -228,12 +229,13 @@
     if (prev && list.some((p) => p.id === prev)) sel.value = prev;
   }
 
-  // 生成按钮态：生成中 或 当前接入方式未配置完成 时禁用；
-  // ready 变化经 storage.onChanged → refreshSettings → applySettings 联动刷新
+  // 生成按钮态：当前接入方式未配置完成时禁用；
+  // ready 变化经 storage.onChanged → refreshSettings → applySettings 联动刷新。
+  // 生成中不禁用——按钮变为「⏹ 放弃等待」，超时与否由用户自行判断
   function syncGenBtn() {
     const s = state.settings;
     const ready = !!(s && s.ready && s.ready[s.provider]);
-    els.genBtn.disabled = state.generating || !ready;
+    els.genBtn.disabled = !state.generating && !ready;
     els.genBtn.title = ready
       ? ''
       : '当前接入方式未配置完成（' + (s ? s.providerLabel : '模型') +
@@ -410,27 +412,39 @@
       return;
     }
     state.generating = true;
-    els.genBtn.disabled = true;
-    els.genBtn.textContent = '生成中…';
+    els.genBtn.textContent = '⏹ 放弃等待';
     setStatus('正在生成…');
     // 快照本次生成的目标推文：填入时绑定它，
     // 避免生成等待期间误触捕获其他推文导致回错帖
     const target = state.captured;
+    // 不设硬超时：请求不切断、结果晚到也自动填入；用户可随时点按钮放弃等待
+    let giveUp;
+    const cancelled = new Promise((res) => {
+      giveUp = res;
+    });
+    state.genCancel = () => giveUp(true);
+    let elapsed = 0;
+    const ticker = setInterval(() => {
+      elapsed += 15;
+      setStatus(
+        '仍在生成中…已耗时 ' + elapsed + ' 秒。不想等可点「⏹ 放弃等待」；结果返回后会自动填入'
+      );
+    }, 15000);
     try {
       const r = await Promise.race([
         send({ type: 'GENERATE', tweet: target, topic: topic || null }),
-        sleep(XCC_GEN_TIMEOUT_MS).then(() => null)
+        cancelled
       ]);
+      if (r === true) {
+        setStatus('已放弃本次生成（可稍后重试或换已验证的模型）');
+        return;
+      }
       if (r && r.ok) {
         els.out.value = r.text;
         state.generatedFor = target;
         setStatus('已生成，可编辑后填入');
       } else if (!r) {
-        setStatus(
-          '生成超时：扩展后台未响应，请到扩展管理页「重新加载」扩展后刷新本页重试。' +
-            '若反复出现，也可能是所选模型在你的通道不可用或过慢',
-          true
-        );
+        setStatus('生成失败：扩展后台无响应，请到扩展管理页「重新加载」扩展后刷新本页重试', true);
       } else {
         const msg = String(r.error || '生成失败，请重试');
         setStatus(
@@ -441,7 +455,9 @@
         );
       }
     } finally {
+      clearInterval(ticker);
       state.generating = false;
+      state.genCancel = null;
       syncGenBtn(); // 不再无条件解禁：若配置仍为空则保持禁用
       els.genBtn.textContent = '✦ 生成';
     }
@@ -718,7 +734,14 @@
     });
   }
 
-  els.genBtn.addEventListener('click', generate);
+  els.genBtn.addEventListener('click', () => {
+    if (state.generating) {
+      // 生成中点击 = 放弃等待（不切断请求，晚到的结果将被忽略）
+      if (state.genCancel) state.genCancel();
+      return;
+    }
+    generate();
+  });
 
   els.panel.addEventListener('click', async (ev) => {
     const btn = ev.target.closest('button');
