@@ -14,6 +14,13 @@ const XCC_UPDATE_SOURCES = [
   'https://api.github.com/repos/' + XCC_REPO + '/contents/manifest.json?ref=main'
 ];
 
+// cli-chat-proxy.grok.com 依赖这三个头把请求识别为 grok CLI 客户端
+const XCC_GROK_CLIENT_HEADERS = {
+  'x-grok-client-version': '0.2.101',
+  'x-grok-client-surface': 'grok-build',
+  'x-grok-client-mode': 'grok-shell'
+};
+
 // ---------- settings 统一读改写（读最新 → 改 → 写回，禁止整份快照覆盖） ----------
 
 async function xccGetSettings() {
@@ -135,6 +142,36 @@ async function xccRefreshGrokToken(o) {
   throw new Error('刷新 Grok 授权失败，请重新登录');
 }
 
+// ---------- Grok OAuth：模型目录发现（GET {apiBase}/models） ----------
+// 返回去重排序的模型 id 数组；失败抛错，由调用方静默兜底。
+// 临近过期的 token 自动刷新并落盘。
+async function xccListGrokModels(o) {
+  let tokens = o.tokens;
+  if (!tokens || !tokens.access_token) throw new Error('Grok 尚未授权');
+  if (!tokens.expires_at || Date.now() > tokens.expires_at - 60000) {
+    tokens = await xccRefreshGrokToken(o);
+    await xccMutateSettings((m) => {
+      m.grokOAuth = { ...m.grokOAuth, tokens };
+    });
+  }
+  const url = String(o.apiBase || '').replace(/\/+$/, '') + '/models';
+  const res = await fetch(url, {
+    headers: { Authorization: 'Bearer ' + tokens.access_token, ...XCC_GROK_CLIENT_HEADERS },
+    signal: AbortSignal.timeout(10000)
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json().catch(() => null);
+  const list = data && (Array.isArray(data.data) ? data.data : data.models);
+  const ids = [];
+  if (Array.isArray(list)) {
+    for (const it of list) {
+      const id = it && typeof it === 'object' ? it.id || it.name : it;
+      if (id) ids.push(String(id));
+    }
+  }
+  return [...new Set(ids)].sort();
+}
+
 // ---------- 模型接入解析与调用 ----------
 
 async function xccResolveProviderCfg(s) {
@@ -162,12 +199,7 @@ async function xccResolveProviderCfg(s) {
       baseUrl: o.apiBase,
       apiKey: tokens.access_token,
       model: o.model,
-      // cli-chat-proxy.grok.com 依赖这三个头把请求识别为 grok CLI 客户端
-      extraHeaders: {
-        'x-grok-client-version': '0.2.101',
-        'x-grok-client-surface': 'grok-build',
-        'x-grok-client-mode': 'grok-shell'
-      }
+      extraHeaders: { ...XCC_GROK_CLIENT_HEADERS } // 勿直接给共享对象本体
     };
   }
   throw new Error('未知的接入方式：' + s.provider);

@@ -10,16 +10,24 @@ let SETTINGS = null;
 
 // ---------- 孤儿页自愈 ----------
 // 扩展重载后，旧实例打开的设置页不会被关闭，只会被切断（Extension context
-// invalidated）：DOM 冻结在重载前状态（如过期横幅），chrome.* 调用全部抛错
-// （表现为按钮点了没反应、保存静默失败）。失效上下文中 chrome.runtime.id 为 undefined。
+// invalidated）：DOM 冻结在重载前状态，chrome.* 调用全部抛错。
+// ⚠ v0.4.0 教训：事件监听器不能直接传本函数——Event 对象会填进 force 形参
+// （!!Event 恒真），健康页在任何 focus/visibilitychange 上都被误判死亡，
+// 先被静默 reload、第二次直接弹"无法自动恢复"。force 只认显式的 true。
+let healReloading = false; // reload 已发起、文档尚未卸载：拦截重复触发
+
 function healOrphanPage(force) {
-  let dead = !!force;
-  try {
-    dead = dead || !(chrome.runtime && chrome.runtime.id);
-  } catch (e) {
-    dead = true;
+  if (healReloading) return;
+  let dead = force === true;
+  if (!dead) {
+    try {
+      dead = !(chrome.runtime && chrome.runtime.id);
+    } catch (e) {
+      dead = true;
+    }
   }
   if (!dead) return;
+  healReloading = true;
   if (sessionStorage.getItem('xccHealTried')) {
     // 已自愈一次仍失效（扩展可能已被移除）：给人工指引，避免刷新死循环
     document.title = '页面已失效 · X 评论副驾';
@@ -31,8 +39,10 @@ function healOrphanPage(force) {
   sessionStorage.setItem('xccHealTried', '1');
   location.reload(); // 解压目录重载后扩展 ID 不变，同 URL 从新实例加载
 }
-window.addEventListener('focus', healOrphanPage);
-document.addEventListener('visibilitychange', healOrphanPage);
+window.addEventListener('focus', () => healOrphanPage());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') healOrphanPage(); // 隐藏态无需自愈
+});
 
 // ---------- 存储 ----------
 
@@ -92,6 +102,7 @@ function initProviderUI() {
   fillOAuthInputs();
   togglePanes();
   renderOAuthStatus();
+  discoverGrokModels().catch(() => {}); // 已授权则拉一次模型目录
 
   $('xai-save').addEventListener('click', () => saveProvider('xai'));
   $('custom-save').addEventListener('click', () => saveProvider('custom'));
@@ -99,6 +110,7 @@ function initProviderUI() {
   $('oauth-start').addEventListener('click', startOAuth);
   $('oauth-logout').addEventListener('click', async () => {
     pollSeq++; // 取消进行中的轮询
+    await clearOauthPending(); // 登出即放弃未完成的设备授权
     try {
       await saveMutate((m) => {
         m.grokOAuth = { ...m.grokOAuth, tokens: null };
@@ -110,6 +122,8 @@ function initProviderUI() {
     await loadSettings();
     fillOAuthInputs();
     renderOAuthStatus();
+    $('oauth-models-discovery').textContent = '';
+    renderOauthModels(XCC_OAUTH_MODEL_FALLBACK); // 退回硬编码候选
     $('oauth-area').hidden = true;
     $('oauth-status').textContent = '已登出';
     toast('已登出 Grok 授权');
@@ -193,6 +207,93 @@ async function saveProvider(kind) {
 
 // ---------- Grok OAuth 设备流（本页直连 auth.x.ai） ----------
 
+// ---------- OAuth 轮询持久化：防页面刷新/关闭/孤儿自愈中断 ----------
+// device_code 只存页面内存时，任何 reload（误刷、标签休眠、自愈）都会杀死
+// 轮询循环——用户已在 xAI 完成授权但 token 永远落不了盘。持久化后新页面自动续上。
+const XCC_OAUTH_PENDING_KEY = 'xccOauthPending';
+
+async function saveOauthPending(p) {
+  try {
+    await chrome.storage.local.set({ [XCC_OAUTH_PENDING_KEY]: p });
+  } catch (e) {
+    /* 写不进时轮询仍可内存续命 */
+  }
+}
+
+async function clearOauthPending() {
+  try {
+    await chrome.storage.local.remove(XCC_OAUTH_PENDING_KEY);
+  } catch (e) {
+    /* 忽略 */
+  }
+}
+
+function showOAuthPending(p, restored) {
+  $('oauth-area').hidden = false;
+  $('oauth-code').textContent = p.user_code || '----';
+  const link = $('oauth-link');
+  link.href = p.verification_uri_complete || p.verification_uri || '#';
+  link.textContent = link.href;
+  $('oauth-status').textContent = restored ? '已恢复上次授权流程，等待登录…' : '已发起授权，等待登录…';
+}
+
+async function restoreOAuthPending() {
+  let p = null;
+  try {
+    p = (await chrome.storage.local.get(XCC_OAUTH_PENDING_KEY))[XCC_OAUTH_PENDING_KEY];
+  } catch (e) {
+    return;
+  }
+  if (!p || !p.device_code) return;
+  if (!p.expires_at || Date.now() > p.expires_at) {
+    await clearOauthPending(); // 已过期：device_code 作废
+    return;
+  }
+  if (SETTINGS.grokOAuth.tokens && SETTINGS.grokOAuth.tokens.access_token) {
+    await clearOauthPending(); // 已授权成功：无需恢复
+    return;
+  }
+  const seq = ++pollSeq; // 接管本页所有旧循环；后续 startOAuth/登出同样可接管它
+  showOAuthPending(p, true);
+  pollDevice(seq, p);
+}
+
+// ---------- Grok OAuth：模型目录发现（授权后自动列出可用模型） ----------
+
+const XCC_OAUTH_MODEL_FALLBACK = [
+  'grok-4.3',
+  'grok-4.5',
+  'grok-composer-2.5-fast',
+  'grok-3-fast',
+  'grok-code-fast-1'
+];
+
+function renderOauthModels(models) {
+  const dl = $('oauth-models');
+  dl.textContent = '';
+  for (const m of models) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    dl.appendChild(opt);
+  }
+}
+
+// tokens 存在时拉 {apiBase}/models 动态填充候选；失败静默保持硬编码兜底
+async function discoverGrokModels() {
+  const o = SETTINGS.grokOAuth;
+  if (!(o.tokens && o.tokens.access_token)) return;
+  try {
+    const discovered = await xccListGrokModels(o);
+    if (discovered.length) {
+      renderOauthModels([...new Set([...discovered, ...XCC_OAUTH_MODEL_FALLBACK])]);
+      $('oauth-models-discovery').textContent =
+        '已发现 ' + discovered.length + ' 个可用模型（也可直接手输任意模型 ID）';
+    }
+  } catch (e) {
+    /* 静默：端点不支持/不可达时保持硬编码候选 */
+  }
+}
+
 function renderOAuthStatus() {
   const t = SETTINGS.grokOAuth.tokens;
   $('oauth-status').textContent = t
@@ -211,6 +312,8 @@ async function startOAuth() {
     $('oauth-status').textContent = '✗ 请先填写 Client ID';
     return;
   }
+  const seq = ++pollSeq; // 新流程立即使旧轮询失效
+  await clearOauthPending();
   for (const ep of [fields.deviceEndpoint, fields.tokenEndpoint, fields.apiBase]) {
     await requestOrigin(ep);
   }
@@ -231,31 +334,35 @@ async function startOAuth() {
     btn.textContent = '开始授权';
   }
 
-  const seq = ++pollSeq;
-  $('oauth-area').hidden = false;
-  $('oauth-code').textContent = r.user_code || '----';
-  const link = $('oauth-link');
-  link.href = r.verification_uri_complete || r.verification_uri || '#';
-  link.textContent = link.href;
-  $('oauth-status').textContent = '已发起授权，等待登录…';
-  pollDevice(seq, r.device_code, r.interval || 5, r.expires_in || 600);
+  const pending = {
+    device_code: r.device_code,
+    interval: r.interval || 5,
+    expires_at: Date.now() + (Number(r.expires_in) || 600) * 1000,
+    user_code: r.user_code || '',
+    verification_uri: r.verification_uri || '',
+    verification_uri_complete: r.verification_uri_complete || ''
+  };
+  await saveOauthPending(pending);
+  showOAuthPending(pending, false);
+  pollDevice(seq, pending);
 }
 
-async function pollDevice(seq, device_code, interval, expires_in) {
-  const deadline = Date.now() + expires_in * 1000;
-  let iv = Math.max(2, interval);
-  while (Date.now() < deadline) {
+async function pollDevice(seq, p) {
+  let iv = Math.max(2, Number(p.interval) || 5);
+  while (Date.now() < p.expires_at) {
     await sleep(iv * 1000);
     if (seq !== pollSeq) return; // 已被新的授权流程或登出取代
     let r;
     try {
-      r = await xccPollDeviceToken(SETTINGS.grokOAuth, device_code);
+      r = await xccPollDeviceToken(SETTINGS.grokOAuth, p.device_code);
     } catch (e) {
+      await clearOauthPending(); // 硬错误：device_code 已作废，避免重载后死循环恢复
       if (seq === pollSeq) $('oauth-status').textContent = '✗ ' + (e && e.message ? e.message : e);
       return;
     }
     if (seq !== pollSeq) return;
     if (r.status === 'authorized') {
+      await clearOauthPending(); // device_code 一次性：先清再落 token
       await saveMutate((m) => {
         m.grokOAuth = { ...m.grokOAuth, tokens: r.tokens };
       });
@@ -266,10 +373,12 @@ async function pollDevice(seq, device_code, interval, expires_in) {
       $('oauth-area').hidden = true;
       $('oauth-status').textContent = '✓ 授权成功，可以使用 Grok 模型了';
       toast('Grok 授权成功');
+      discoverGrokModels().catch(() => {}); // 授权成功即发现可用模型
       return;
     }
     if (r.slow_down) iv = Math.min(iv + 5, 30); // RFC 8628：被限流时加大轮询间隔
   }
+  await clearOauthPending(); // 超时同样清理
   if (seq === pollSeq) $('oauth-status').textContent = '授权超时，请重试';
 }
 
@@ -449,10 +558,14 @@ function initUpdateBanner() {
   healOrphanPage(); // 必须最先：孤儿页下后续所有 chrome.* 调用都会抛错
   try {
     await loadSettings();
+    // 能读到 storage 说明本页健康：清除自愈标记，把"reload 一次"的额度还给本标签页
+    // （sessionStorage 跨 reload 保留，不清除的话一次自愈后就永久处于第二阶段）
+    sessionStorage.removeItem('xccHealTried');
     initProviderUI();
     initPresetUI();
     initParamsUI();
     initUpdateBanner();
+    restoreOAuthPending().catch(() => {}); // 有未完成的设备授权则自动续上
   } catch (e) {
     if (/Extension context invalidated/i.test(String(e && e.message))) healOrphanPage(true);
     else throw e;

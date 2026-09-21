@@ -13,7 +13,8 @@
     settings: null,
     captured: null, // { author, name, text, href } 当前捕获的推文
     generatedFor: null, // 生成结果对应的推文快照（防止回错帖）
-    generating: false
+    generating: false,
+    inserting: false // 填入进行中：防双击竞态
   };
 
   // ---------- 基础工具 ----------
@@ -135,6 +136,7 @@
       background: rgba(255,255,255,.05); color: #e7e9ea;
     }
     .xcc-row button:hover { background: rgba(255,255,255,.1); }
+    .xcc-row button:disabled { opacity: .55; cursor: not-allowed; }
     .xcc-row .xcc-main {
       background: linear-gradient(135deg, #8b5cfa, #4f46e5);
       border: none; color: #fff; font-weight: 600; flex: 1.4;
@@ -190,6 +192,7 @@
     tweetBd: shadow.querySelector('.xcc-tweet-bd'),
     topic: shadow.querySelector('.xcc-topic'),
     genBtn: shadow.querySelector('.xcc-gen-btn'),
+    insertBtn: shadow.querySelector('.xcc-row [data-act="insert"]'),
     out: shadow.querySelector('.xcc-out'),
     status: shadow.querySelector('.xcc-status')
   };
@@ -460,15 +463,130 @@
     return null;
   }
 
-  function insertInto(editor, text) {
-    editor.focus();
-    try {
-      document.execCommand('selectAll', false, null);
-    } catch (e) {
-      /* 空编辑器无选区，忽略 */
+  // 编辑器当前文本（X 把换行渲染成 <br>/nbsp，比较前归一化）
+  function normEditorText(s) {
+    return String(s || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\r\n?/g, '\n')
+      .replace(/\u200b/g, '')
+      .trim();
+  }
+
+  function countOccurrences(hay, needle) {
+    if (!needle) return 0;
+    let n = 0;
+    let i = hay.indexOf(needle);
+    while (i !== -1) {
+      n++;
+      i = hay.indexOf(needle, i + needle.length);
     }
-    // Draft.js 监听 input 事件，execCommand insertText 会触发完整的输入链路
-    return document.execCommand('insertText', false, text);
+    return n;
+  }
+
+  // 把选区严格锚定在编辑器内部（Range API，非文档级 selectAll）
+  function selectEditorContents(editor) {
+    try {
+      editor.focus();
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 空编辑器：把光标落进框架托管的最深文本块（Draft [data-contents] /
+  // Lexical 块级节点），避免 execCommand 把裸文本节点插到托管子树之外——
+  // 那正是"两段重复、上面一段退格删不掉"的幽灵碎片来源
+  function placeCaretInLeaf(editor) {
+    try {
+      editor.focus();
+      const sel = window.getSelection();
+      if (sel.rangeCount && editor.contains(sel.anchorNode) && sel.anchorNode !== editor) return;
+      const leaf =
+        editor.querySelector('[data-block], [data-lexical-text="true"], [data-contents], p, span') ||
+        editor;
+      const range = document.createRange();
+      range.selectNodeContents(leaf);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (e) {
+      /* 保持 focus 默认位置 */
+    }
+  }
+
+  function rawInsert(editor, text) {
+    try {
+      return document.execCommand('insertText', false, text);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 清空编辑器（范围内全选后 delete，连托管树外的孤儿碎片一并清掉）
+  function clearEditor(editor) {
+    try {
+      if (!selectEditorContents(editor)) return false;
+      return document.execCommand('delete', false, null);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 兜底通道：合成 paste 走框架粘贴管线，插入必然落在框架状态内。
+  // isTrusted=false 所以只作最后回退，不当主路径。
+  function pasteInsert(editor, text) {
+    try {
+      editor.focus();
+      const dt = new DataTransfer();
+      dt.setData('text/plain', text);
+      editor.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt })
+      );
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 填入并校验：成功 = innerText 恰好包含一次目标文本。
+  // 返回 'ok' | 'skip' | 'recovered' | 'fail'；失败时清场不留半份/重复内容。
+  async function insertInto(editor, text) {
+    const want = normEditorText(text);
+    if (!want) return 'fail';
+    // 幂等防重：编辑器已含同样内容（上轮残留/双击第二次）则跳过
+    if (countOccurrences(normEditorText(editor.innerText), want) > 0) return 'skip';
+
+    // 第一次：空编辑器只落位光标（不动选区）；已有旧草稿才全选替换
+    editor.focus();
+    if (normEditorText(editor.innerText)) {
+      if (!selectEditorContents(editor)) return 'fail';
+    } else {
+      placeCaretInLeaf(editor);
+    }
+    let ok = rawInsert(editor, text);
+    await sleep(200); // 等 Draft/Lexical 完成 模型↔DOM 同步再校验
+    if (ok && countOccurrences(normEditorText(editor.innerText), want) === 1) return 'ok';
+
+    // 异常（0 份或 ≥2 份）：清空后重插
+    clearEditor(editor);
+    placeCaretInLeaf(editor);
+    ok = rawInsert(editor, text);
+    await sleep(200);
+    if (ok && countOccurrences(normEditorText(editor.innerText), want) === 1) return 'recovered';
+
+    // 仍异常：合成 paste 兜底
+    clearEditor(editor);
+    pasteInsert(editor, text);
+    await sleep(200);
+    if (countOccurrences(normEditorText(editor.innerText), want) === 1) return 'recovered';
+
+    clearEditor(editor); // 彻底失败：清场，走剪贴板兜底
+    return 'fail';
   }
 
   async function copyText(t) {
@@ -497,65 +615,88 @@
   }
 
   async function insertResult() {
+    if (state.inserting) return;
     const text = els.out.value.trim();
     if (!text) {
       setStatus('还没有内容可填入', true);
       return;
     }
-    // 结果绑定生成时的推文；纯手写内容（从未生成过）才用当前捕获
-    const target = state.generatedFor || state.captured;
-    if (target && target.href) {
-      // 回复模式：找到原推文 → 点回复按钮 → 等编辑器出现 → 写入
-      const art = findArticleByHref(target.href);
-      if (!art) {
-        setStatus('页面上找不到原推文（可能已滚出屏幕），请滚回该推文附近再试', true);
-        return;
-      }
-      const replyBtn = art.querySelector('[data-testid="reply"]');
-      if (!replyBtn) {
-        setStatus('找不到该推文的回复按钮', true);
-        return;
-      }
-      const before = new Set(visibleEditors());
-      replyBtn.click();
-      const editor = await waitForNewEditor(before, 6000);
-      if (!editor) {
-        setStatus('回复框未能打开，内容已复制，请手动粘贴', true);
-        copyText(text);
-        return;
-      }
-      const ok = insertInto(editor, text);
-      if (ok) {
-        setStatus(
-          target !== state.captured
-            ? '✓ 已按生成时的推文（' + (target.author || '') + '）填入，检查后手动发送'
-            : '✓ 已填入回复框，检查后手动点发送'
+    state.inserting = true;
+    els.insertBtn.disabled = true; // 操作期间禁用，防双击竞态
+    try {
+      // 结果绑定生成时的推文；纯手写内容（从未生成过）才用当前捕获
+      const target = state.generatedFor || state.captured;
+      if (target && target.href) {
+        // 已有可见编辑器包含同样内容（此前已填过/弹层还开着）：直接视为成功，
+        // 不再点回复按钮——避免二次开框与双份内容
+        const dup = visibleEditors().find(
+          (e) => countOccurrences(normEditorText(e.innerText), normEditorText(text)) > 0
         );
+        if (dup) {
+          setStatus('回复框已包含该内容，未重复填入');
+          return;
+        }
+        // 回复模式：找到原推文 → 点回复按钮 → 等编辑器出现 → 写入
+        const art = findArticleByHref(target.href);
+        if (!art) {
+          setStatus('页面上找不到原推文（可能已滚出屏幕），请滚回该推文附近再试', true);
+          return;
+        }
+        const replyBtn = art.querySelector('[data-testid="reply"]');
+        if (!replyBtn) {
+          setStatus('找不到该推文的回复按钮', true);
+          return;
+        }
+        const before = new Set(visibleEditors());
+        replyBtn.click();
+        const editor = await waitForNewEditor(before, 6000);
+        if (!editor) {
+          setStatus('回复框未能打开，内容已复制，请手动粘贴', true);
+          copyText(text);
+          return;
+        }
+        const r = await insertInto(editor, text);
+        if (r === 'ok' || r === 'recovered') {
+          setStatus(
+            (r === 'recovered' ? '已自动纠正一次异常插入，请检查。' : '') +
+              (target !== state.captured
+                ? '✓ 已按生成时的推文（' + (target.author || '') + '）填入，检查后手动发送'
+                : '✓ 已填入回复框，检查后手动点发送')
+          );
+        } else if (r === 'skip') {
+          setStatus('回复框已包含该内容，未重复填入');
+        } else {
+          setStatus('填入异常（未能确认唯一内容），已复制，请手动粘贴', true);
+          copyText(text);
+        }
       } else {
-        setStatus('填入失败，内容已复制，请手动粘贴', true);
-        copyText(text);
-      }
-    } else {
-      // 原创模式：优先用首页发帖框，没有就点侧栏发帖按钮
-      let editor = visibleEditors()[0] || null;
-      if (!editor) {
-        const fab = document.querySelector('[data-testid="SideNav_NewTweet_Button"]');
-        if (fab) {
-          const before = new Set(visibleEditors());
-          fab.click();
-          editor = await waitForNewEditor(before, 6000);
+        // 原创模式：优先用首页发帖框，没有就点侧栏发帖按钮
+        let editor = visibleEditors()[0] || null;
+        if (!editor) {
+          const fab = document.querySelector('[data-testid="SideNav_NewTweet_Button"]');
+          if (fab) {
+            const before = new Set(visibleEditors());
+            fab.click();
+            editor = await waitForNewEditor(before, 6000);
+          }
+        }
+        if (!editor) {
+          setStatus('未找到发帖输入框：请先打开 X 首页，或手动点开发帖框后重试', true);
+          return;
+        }
+        const r = await insertInto(editor, text);
+        if (r === 'ok' || r === 'recovered') {
+          setStatus((r === 'recovered' ? '已自动纠正一次异常插入，请检查。' : '') + '✓ 已填入发帖框，检查后手动发送');
+        } else if (r === 'skip') {
+          setStatus('发帖框已包含该内容，未重复填入');
+        } else {
+          setStatus('填入异常（未能确认唯一内容），已复制', true);
+          copyText(text);
         }
       }
-      if (!editor) {
-        setStatus('未找到发帖输入框：请先打开 X 首页，或手动点开发帖框后重试', true);
-        return;
-      }
-      const ok = insertInto(editor, text);
-      if (ok) setStatus('✓ 已填入发帖框，检查后手动发送');
-      else {
-        setStatus('填入失败，内容已复制', true);
-        copyText(text);
-      }
+    } finally {
+      state.inserting = false;
+      els.insertBtn.disabled = false;
     }
   }
 
