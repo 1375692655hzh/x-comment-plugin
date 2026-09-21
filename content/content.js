@@ -426,9 +426,19 @@
         state.generatedFor = target;
         setStatus('已生成，可编辑后填入');
       } else if (!r) {
-        setStatus('生成超时：扩展后台未响应，请到扩展管理页「重新加载」扩展后刷新本页重试', true);
+        setStatus(
+          '生成超时：扩展后台未响应，请到扩展管理页「重新加载」扩展后刷新本页重试。' +
+            '若反复出现，也可能是所选模型在你的通道不可用或过慢',
+          true
+        );
       } else {
-        setStatus(r.error || '生成失败，请重试', true);
+        const msg = String(r.error || '生成失败，请重试');
+        setStatus(
+          /API 4\d\d|model|not\s*found|reasoning|模型/i.test(msg)
+            ? msg + '。该模型可能不在你账号的可用列表或参数不被支持：试试设置页下拉里标注（已验证）的模型；若刚改过思考强度请切回「默认」'
+            : msg,
+          true
+        );
       }
     } finally {
       state.generating = false;

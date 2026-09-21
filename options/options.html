@@ -70,7 +70,7 @@
         插件已内置 grok CLI 同款公开客户端与端点。</p>
       <div class="field"><label>模型</label>
         <select id="oauth-model"></select>
-        <input id="oauth-model-custom" placeholder="输入任意模型 ID，如 grok-4.6" hidden>
+        <input id="oauth-model-custom" placeholder="输入账号目录外的模型 ID（不保证可用）" hidden>
         <p class="hint" id="oauth-models-discovery"></p>
       </div>
       <details>
@@ -125,6 +125,16 @@
         <option value="zh">强制中文</option>
         <option value="en">强制英文</option>
       </select></div>
+    <div class="field"><label>思考强度（reasoning_effort，仅推理模型生效）</label>
+      <select id="reasoning">
+        <option value="default">默认 · 不发送该参数（兼容所有接口）</option>
+        <option value="low">low · 快速，少思考</option>
+        <option value="medium">medium · 中等</option>
+        <option value="high">high · 深度思考</option>
+      </select>
+      <p class="hint">仅 Grok 4.5 / 4.6 等推理模型支持（不发送时服务端默认 high，且推理无法关闭——
+        不想思考请直接选 non-reasoning 模型）。设为 low 可显著加快生成、减少超时。
+        Grok 订阅授权通道若不认该参数报错，请切回「默认」。</p></div>
     <div class="row"><button class="primary" id="params-save">保存参数</button>
       <span class="hint" id="params-status"></span></div>
   </section>

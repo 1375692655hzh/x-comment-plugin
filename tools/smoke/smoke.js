@@ -40,6 +40,7 @@ const t = (name, ok, extra) => {
 
 // ---------- 本地静态服务 + OAuth 模拟端点 ----------
 const oauthState = { grant: false };
+const mockLLM = { count: 0, lastBody: null, lastAuth: '' }; // 真实生成链路 mock：记录请求体供断言
 
 const server = http.createServer((req, res) => {
   const send = (code, body, type) => {
@@ -67,6 +68,33 @@ const server = http.createServer((req, res) => {
       data: [{ id: 'grok-4.3' }, { id: 'grok-4.6-discovered' }, { id: 'grok-code-fast-1' }]
     });
   }
+  if (req.method === 'POST' && req.url === '/v1/chat/completions') {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      mockLLM.lastBody = raw;
+      mockLLM.lastAuth = req.headers['authorization'] || '';
+      mockLLM.count++;
+      let model = '';
+      try {
+        model = JSON.parse(raw).model;
+      } catch (e) {
+        /* 忽略 */
+      }
+      if (model === 'missing-model') {
+        return send(404, { error: { message: 'model not found: missing-model' } });
+      }
+      send(200, {
+        id: 'chatcmpl-smoke',
+        object: 'chat.completion',
+        model,
+        choices: [
+          { index: 0, message: { role: 'assistant', content: 'SMOKE-GEN 固定回复' }, finish_reason: 'stop' }
+        ]
+      });
+    });
+    return;
+  }
   const file = req.url === '/' || req.url === '/page.html' ? 'page.html' : req.url.replace(/\//g, '');
   const p = path.join(here, file);
   if (fs.existsSync(p) && fs.statSync(p).isFile()) {
@@ -80,6 +108,11 @@ const server = http.createServer((req, res) => {
 
 (async () => {
   await new Promise((r) => server.listen(PORT, r));
+
+  // 全新 profile：持久 profile 下 Chromium 会缓存扩展 SW 的编译字节码，
+  // 同路径重建扩展后旧代码可能继续运行（版本号变更也未必失效）
+  const profileDir = path.join(here, 'profile');
+  fs.rmSync(profileDir, { recursive: true, force: true });
 
   const extPath = path.join(here, 'ext');
   const context = await chromium.launchPersistentContext(path.join(here, 'profile'), {
@@ -243,6 +276,110 @@ const server = http.createServer((req, res) => {
       });
       await page.waitForTimeout(700);
       if (await page.locator('.xcc-gen-btn').isDisabled()) throw new Error('按钮未解禁');
+    });
+
+    // 6.5 真实生成链路端到端：content → SW → xccChatCompletion → 本地 mock
+    await step('真实生成端到端：mock 回填输出框，system=人设、含推文、默认不发 reasoning_effort', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.provider = 'custom';
+        m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'smoke-model' };
+        m.genParams = { ...m.genParams, reasoningEffort: 'default' };
+        await chrome.storage.local.set({ settings: m });
+      });
+      await page.bringToFront();
+      // 前面的插入测试打开了全屏模拟弹窗，会挡住推文的可操作性检查：先收起
+      await page.evaluate(() => {
+        document.getElementById('modal').style.display = 'none';
+      });
+      // 重新捕获确保上下文就绪，并等按钮解禁（storage.onChanged → syncGenBtn）
+      await page.locator('article[data-testid="tweet"]').first().hover();
+      await page.waitForTimeout(300);
+      await page.locator('.xcc-hover-btn').click();
+      await page.waitForTimeout(500);
+      if (await page.locator('.xcc-gen-btn').isDisabled()) throw new Error('生成按钮未解禁');
+      await page.locator('.xcc-gen-btn').click();
+      await page.waitForFunction(() => {
+        const host = document.querySelector('#xcc-host');
+        const out = host && host.shadowRoot && host.shadowRoot.querySelector('.xcc-out');
+        return !!(out && out.value.includes('SMOKE-GEN'));
+      }, null, { timeout: 20000 });
+      const st = await page.locator('.xcc-status').innerText();
+      if (!st.includes('已生成')) throw new Error('状态栏异常: ' + st.slice(0, 60));
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      if (body.model !== 'smoke-model') throw new Error('模型不符: ' + body.model);
+      if (!Array.isArray(body.messages) || body.messages[0].role !== 'system') throw new Error('messages[0] 非 system');
+      if (!String(body.messages[0].content).includes('资深网友')) throw new Error('system 未携带人设');
+      if (!body.messages.some((x) => String(x.content || '').includes('Grok 4.5 的上下文长度'))) throw new Error('user 未含推文文本');
+      if ('reasoning_effort' in body) throw new Error('默认档不应发送 reasoning_effort');
+      if (mockLLM.lastAuth !== 'Bearer smoke-key') throw new Error('鉴权头未透传: ' + mockLLM.lastAuth);
+      return body.messages.length + ' 条 messages';
+    });
+
+    await step('真实生成端到端：reasoning_effort=high 注入请求体', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.genParams.reasoningEffort = 'high';
+        await chrome.storage.local.set({ settings });
+      });
+      // 写后读回校验：确认落盘的是 high
+      const rb = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.genParams && settings.genParams.reasoningEffort;
+      });
+      if (rb !== 'high') throw new Error('写回校验失败: ' + JSON.stringify(rb));
+      const before = mockLLM.count;
+      await page.bringToFront();
+      if (!(await page.locator('.xcc-panel').isVisible().catch(() => false))) {
+        await page.locator('.xcc-launcher').click();
+      }
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15000 && mockLLM.count < before + 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (mockLLM.count < before + 1) throw new Error('第二次请求未到达');
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      if (body.reasoning_effort !== 'high') {
+        throw new Error(
+          'reasoning_effort 未注入: ' + JSON.stringify(body.reasoning_effort) +
+          ' | 完整请求体 keys: ' + Object.keys(body).join(',') +
+          ' | genParams=' + JSON.stringify(body.messages && body.messages.length)
+        );
+      }
+    });
+
+    await step('生成失败链路：4xx 原文透出并追加换模型提示', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.provider = 'custom';
+        settings.custom.model = 'missing-model';
+        settings.genParams.reasoningEffort = 'default';
+        await chrome.storage.local.set({ settings });
+      });
+      await page.bringToFront();
+      await page.waitForTimeout(700);
+      if (await page.locator('.xcc-gen-btn').isDisabled()) throw new Error('按钮被误禁用');
+      await page.locator('.xcc-gen-btn').click();
+      await page.waitForFunction(() => {
+        const host = document.querySelector('#xcc-host');
+        const st = host && host.shadowRoot && host.shadowRoot.querySelector('.xcc-status');
+        return !!(st && st.classList.contains('err') && st.textContent.includes('API 404'));
+      }, null, { timeout: 20000 });
+      const st = await page.locator('.xcc-status').innerText();
+      if (!st.includes('已验证')) throw new Error('未追加换模型提示: ' + st.slice(0, 80));
+      // 收尾恢复，避免污染后续步骤
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.provider = 'xai';
+        settings.custom = { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' };
+        await chrome.storage.local.set({ settings });
+      });
+      await page.waitForTimeout(500);
     });
 
     // 7. 更新横幅免疫：伪造 hasUpdate=true 但版本相同 → 必须隐藏

@@ -118,7 +118,7 @@ function initProviderUI() {
     await clearOauthPending(); // 登出即放弃未完成的设备授权
     try {
       await saveMutate((m) => {
-        m.grokOAuth = { ...m.grokOAuth, tokens: null };
+        m.grokOAuth = { ...m.grokOAuth, tokens: null, discoveredModels: [] };
       });
     } catch (e) {
       toast('登出失败：' + (e && e.message ? e.message : e), true);
@@ -291,17 +291,23 @@ const XCC_OAUTH_MODEL_FALLBACK = [
 ];
 
 // 重建模型下拉：传入候选 + 硬编码兜底 + 当前已存值 去重合并，末尾追加「自定义 ID…」。
+// 有账号目录（发现落盘或本次发现）时区分「已验证 / 未验证」标注，避免盲选不可用模型。
 // 程序化 sel.value= 不触发 change，不会误写盘/误 toast。
 function renderOauthModels(models) {
   const sel = $('oauth-model');
   const custom = $('oauth-model-custom');
   const cur = String(SETTINGS.grokOAuth.model || '').trim() || XCC_OAUTH_MODEL_FALLBACK[0];
+  const verified = new Set([
+    ...(SETTINGS.grokOAuth.discoveredModels || []),
+    ...(Array.isArray(models) ? models : [])
+  ]);
+  const hasDiscovery = verified.size > 0;
   const list = [...new Set([...models, ...XCC_OAUTH_MODEL_FALLBACK, cur])];
   sel.textContent = '';
   for (const m of list) {
     const opt = document.createElement('option');
-    opt.value = m;
-    opt.textContent = m;
+    opt.value = m; // value 保持干净 ID：落盘与 selectOption 不受标注影响
+    opt.textContent = hasDiscovery ? (verified.has(m) ? m + '（已验证）' : m + '（未验证）') : m;
     sel.appendChild(opt);
   }
   const customOpt = document.createElement('option');
@@ -331,9 +337,13 @@ async function discoverGrokModels() {
   try {
     const discovered = await xccListGrokModels(o);
     if (discovered.length) {
+      await saveMutate((m) => {
+        m.grokOAuth = { ...m.grokOAuth, discoveredModels: discovered }; // 目录落盘，重开页面仍有「已验证」标注
+      });
+      await loadSettings();
       renderOauthModels(discovered); // 兜底与当前值在 renderOauthModels 内部合并
       $('oauth-models-discovery').textContent =
-        '已发现 ' + discovered.length + ' 个可用模型（不在列表可选「自定义 ID…」）';
+        '已发现 ' + discovered.length + ' 个可用模型；标注（已验证）的已确认在你账号可用，其余为内置候选（未验证）';
     }
   } catch (e) {
     /* 静默：端点不支持/不可达时保持硬编码候选 */
@@ -530,6 +540,10 @@ function presetCard(kind, p, isActive) {
     ta.placeholder = '例：针对 {tweet_text} 写一条…… 可用占位符 {author} {topic}';
   }
   card.append(head, ta);
+  // 编辑即标脏；保存后 renderPresets 整卡重建自然清除
+  const markDirty = () => card.classList.add('dirty');
+  name.addEventListener('input', markDirty);
+  ta.addEventListener('input', markDirty);
 
   const listKey = kind === 'persona' ? 'personaPresets' : 'genPresets';
   const bodyKey = kind === 'persona' ? 'persona' : 'prompt';
@@ -602,6 +616,9 @@ function initParamsUI() {
   $('temp-val').textContent = SETTINGS.genParams.temperature;
   $('maxtok').value = SETTINGS.genParams.maxTokens;
   $('lang').value = SETTINGS.genParams.language;
+  $('reasoning').value = ['low', 'medium', 'high'].includes(SETTINGS.genParams.reasoningEffort)
+    ? SETTINGS.genParams.reasoningEffort
+    : 'default';
   $('temp').addEventListener('input', () => ($('temp-val').textContent = $('temp').value));
   $('params-save').addEventListener('click', async () => {
     const temp = parseFloat($('temp').value);
@@ -609,7 +626,10 @@ function initParamsUI() {
     const params = {
       temperature: Number.isFinite(temp) ? Math.min(1.5, Math.max(0, temp)) : 0.9,
       maxTokens: Number.isFinite(mt) ? Math.min(2000, Math.max(50, mt)) : 400,
-      language: $('lang').value
+      language: $('lang').value,
+      reasoningEffort: ['low', 'medium', 'high'].includes($('reasoning').value)
+        ? $('reasoning').value
+        : 'default'
     };
     await saveMutate((m) => {
       m.genParams = params;

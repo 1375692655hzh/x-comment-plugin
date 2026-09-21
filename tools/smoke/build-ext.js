@@ -35,8 +35,8 @@ fs.writeFileSync(manPath, JSON.stringify(man, null, 2));
 const swPath = path.join(dest, 'background', 'service-worker.js');
 let sw = fs.readFileSync(swPath, 'utf8');
 sw = sw.replace(
-  "importScripts('/shared/common.js');",
-  `importScripts('/shared/common.js');
+  "importScripts('/shared/common.js', '/shared/api.js');",
+  `importScripts('/shared/common.js', '/shared/api.js');
 chrome.storage.local.set({ swBoot: 'import-ok' }).catch(function(e){});`
 );
 sw = sw.replace(

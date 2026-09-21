@@ -25,6 +25,7 @@ const XCC_DEFAULTS = {
     scope: 'openid profile email offline_access grok-cli:access api:access',
     apiBase: 'https://cli-chat-proxy.grok.com/v1',
     model: 'grok-4.3',
+    discoveredModels: [], // 最近一次 /models 发现的账号目录（下拉区分「已验证」用）
     tokens: null // { access_token, refresh_token, expires_at }
   },
 
@@ -87,7 +88,13 @@ const XCC_DEFAULTS = {
   activePersonaId: 'p-general',
   activeGenId: 'g-agree',
 
-  genParams: { temperature: 0.9, maxTokens: 400, language: 'auto' }
+  genParams: {
+    temperature: 0.9,
+    maxTokens: 400,
+    language: 'auto',
+    // 思考强度：'default' 不发送该参数（对不支持的端点零影响）| 'low' | 'medium' | 'high'
+    reasoningEffort: 'default'
+  }
 };
 
 // 把 chrome.storage.local 中保存的 settings 合并到默认值上（兼容旧版本缺字段）

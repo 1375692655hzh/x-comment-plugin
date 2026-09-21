@@ -79,7 +79,13 @@ code {
 /* 提示词卡片 */
 .preset-card {
   border: 1px solid var(--line); border-radius: 10px;
-  padding: 10px 12px; margin-bottom: 10px;
+  padding: 10px 12px; margin-bottom: 10px; position: relative;
+}
+.preset-card.dirty { border-color: #f59e0b; }
+.preset-card.dirty::after {
+  content: '● 未保存';
+  position: absolute; top: 6px; right: 10px;
+  font-size: 11px; color: #f59e0b; font-weight: 600;
 }
 .preset-card.active { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand) inset; }
 .preset-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
