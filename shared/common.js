@@ -122,6 +122,19 @@ function xccUid(prefix) {
 const XCC_ZIP_URL =
   'https://github.com/1375692655hzh/x-comment-plugin/archive/refs/heads/main.zip';
 
+// 版本比较：a 是否大于 b（点分数字逐段比较）
+function xccIsNewerVersion(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return false;
+}
+
 // 脱敏的公开配置视图（content/popup 直接本地计算，不依赖后台 SW）
 function xccPublicSettings(s) {
   const label =

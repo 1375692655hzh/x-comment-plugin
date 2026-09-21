@@ -377,19 +377,35 @@ function initParamsUI() {
 // ---------- 更新检测 ----------
 
 function renderUpdateBanner(u) {
-  $('update-banner').hidden = !(u && u.hasUpdate);
-  if (u && u.hasUpdate) $('update-version').textContent = 'v' + u.latest;
+  // 关键：显示时用「已装版本 vs 远端版本号」现场重算，不信存储里的 hasUpdate 旧结论，
+  // 否则升级完成后若后台没重跑检查，横幅会一直误报
+  const installed = chrome.runtime.getManifest().version;
+  const has = !!(u && u.latest && xccIsNewerVersion(u.latest, installed));
+  $('update-banner').hidden = !has;
+  if (has) $('update-version').textContent = 'v' + u.latest;
 }
 
 function initUpdateBanner() {
   (async () => {
     const { xccUpdate } = await chrome.storage.local.get('xccUpdate');
     renderUpdateBanner(xccUpdate);
+    // 顺手触发一次新检查（后台不可用则静默跳过，显示逻辑不依赖它）
+    try {
+      await Promise.race([send({ type: 'CHECK_UPDATE' }), sleep(4000)]);
+      const fresh = await chrome.storage.local.get('xccUpdate');
+      renderUpdateBanner(fresh.xccUpdate);
+    } catch (e) {
+      /* 检查失败不影响显示 */
+    }
   })();
   $('update-open').addEventListener('click', () => window.open(XCC_ZIP_URL, '_blank'));
   $('update-check').addEventListener('click', async () => {
     const r = await send({ type: 'CHECK_UPDATE' });
     if (r.ok) renderUpdateBanner(r.update);
+    else {
+      const { xccUpdate } = await chrome.storage.local.get('xccUpdate');
+      renderUpdateBanner(xccUpdate);
+    }
   });
 }
 

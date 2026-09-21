@@ -227,9 +227,12 @@
     const ok = pub.ready && pub.ready[pub.provider];
     els.provider.textContent = pub.providerLabel + (ok ? '' : ' · 未配置，点 ⚙ 去设置');
     els.provider.classList.toggle('warn', !ok);
+    // 同设置页：现场用已装版本重算，不用存储里的旧结论
     const upd = pub.update;
-    els.update.hidden = !(upd && upd.hasUpdate);
-    if (upd && upd.hasUpdate) {
+    const installed = chrome.runtime.getManifest().version;
+    const show = !!(upd && upd.latest && xccIsNewerVersion(upd.latest, installed));
+    els.update.hidden = !show;
+    if (show) {
       els.update.textContent = '🆕 有新版 v' + upd.latest + '：点击下载 ZIP，解压替换后重新加载扩展';
     }
   }
