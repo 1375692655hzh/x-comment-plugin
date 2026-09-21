@@ -93,8 +93,14 @@ const XCC_DEFAULTS = {
     maxTokens: 400,
     language: 'auto',
     // 思考强度：'default' 不发送该参数（对不支持的端点零影响）| 'low' | 'medium' | 'high'
-    reasoningEffort: 'default'
-  }
+    reasoningEffort: 'default',
+    // 账号模式：'free' = X 免费用户（280 字符上限，生成时注入硬约束）| 'premium' = 付费不限长
+    xPlan: 'free',
+    targetLength: '' // 付费模式的目标字数（字符串，空 = 不加长度指令，仅模糊参考）
+  },
+
+  // 面板停靠侧：'left' | 'right'（全高侧边栏形态，v0.5.0 起默认左侧）
+  panelSide: 'left'
 };
 
 // 把 chrome.storage.local 中保存的 settings 合并到默认值上（兼容旧版本缺字段）
@@ -162,6 +168,11 @@ function xccPublicSettings(s) {
     personaPresets: s.personaPresets,
     genPresets: s.genPresets,
     activePersonaId: s.activePersonaId,
-    activeGenId: s.activeGenId
+    activeGenId: s.activeGenId,
+    genParams: {
+      xPlan: s.genParams.xPlan === 'premium' ? 'premium' : 'free', // 脏值一律按 free
+      targetLength: String(s.genParams.targetLength || '')
+    },
+    panelSide: s.panelSide === 'right' ? 'right' : 'left'
   };
 }

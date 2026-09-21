@@ -57,6 +57,23 @@ function buildMessages(s, req) {
   else if (s.genParams.language === 'en') sys += '\n\nAlways write in English.';
   else sys += '\n\n默认使用与推文相同的语言；无法判断时用中文。';
 
+  // 输出格式硬约束：压制 markdown 残留与"好的/以下是…"类前后缀
+  sys +=
+    '\n\n输出格式硬约束：直接输出评论正文本身。不要使用任何 markdown（# 标题、**加粗**、' +
+    '列表符号、`代码` 都不要），不要任何前言或后语（如"好的""以下是评论""希望有帮助"），' +
+    '不要用引号把正文包起来；话题标签（#hashtag）允许使用。';
+
+  // 账号模式长度指令（脏值一律按免费处理）
+  if (s.genParams.xPlan === 'premium') {
+    const n = parseInt(s.genParams.targetLength, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 2000) {
+      sys += '\n\n长度参考：目标约 ' + n + ' 字，不必严格，以自然表达为准。';
+    }
+  } else {
+    sys +=
+      '\n\n长度硬约束：X 免费账户单条回复上限 280 个字符，你的输出总长不得超过 280 个字符（含标点、空格与 emoji）。';
+  }
+
   return [
     { role: 'system', content: sys },
     { role: 'user', content: prompt }

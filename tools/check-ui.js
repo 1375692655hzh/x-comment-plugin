@@ -68,6 +68,15 @@ check(oh.includes('../shared/api.js'), 'options.html 引用 api.js');
   }
 }
 
+// 5.6 v0.5.0 门禁：免费 280 约束 / 付费目标字数 / 输出清洗 / 面板模式控件
+check(sw.includes('280 个字符'), 'SW 注入免费 280 字符硬约束');
+check(sw.includes('目标约'), 'SW 注入付费目标字数（模糊参考）');
+check(sw.includes('直接输出评论正文'), 'SW system 含输出格式硬约束');
+check(read('shared/api.js').includes('function xccCleanReplyText'), 'api.js 存在输出清洗函数');
+check(content.includes('plan-free') && content.includes('plan-premium'), '面板存在免费/付费切换按钮');
+check(content.includes('xcc-target-len') && content.includes('xcc-count'), '面板存在目标字数输入与计数器');
+check(/id="panel-side"/.test(oh), '设置页存在面板位置选择');
+
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));
 const refs = [

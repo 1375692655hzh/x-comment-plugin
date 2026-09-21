@@ -40,7 +40,7 @@ const t = (name, ok, extra) => {
 
 // ---------- 本地静态服务 + OAuth 模拟端点 ----------
 const oauthState = { grant: false };
-const mockLLM = { count: 0, lastBody: null, lastAuth: '' }; // 真实生成链路 mock：记录请求体供断言
+const mockLLM = { count: 0, lastBody: null, lastAuth: '', reply: null }; // 真实生成链路 mock：记录请求体供断言；reply 可注入自定义回复
 
 const server = http.createServer((req, res) => {
   const send = (code, body, type) => {
@@ -89,7 +89,7 @@ const server = http.createServer((req, res) => {
         object: 'chat.completion',
         model,
         choices: [
-          { index: 0, message: { role: 'assistant', content: 'SMOKE-GEN 固定回复' }, finish_reason: 'stop' }
+          { index: 0, message: { role: 'assistant', content: mockLLM.reply || 'SMOKE-GEN 固定回复' }, finish_reason: 'stop' }
         ]
       });
     });
@@ -226,6 +226,40 @@ const server = http.createServer((req, res) => {
         if (n !== 1) throw new Error('出现 ' + n + ' 份');
       });
 
+      // v0.5.0 全高侧边栏形态
+      await step('面板为全高侧边栏：高≈视口、宽 380、默认贴左缘', async () => {
+        const box = await page.evaluate(() => {
+          const sr = document.querySelector('#xcc-host').shadowRoot;
+          const p = sr.querySelector('.xcc-panel');
+          const r = p.getBoundingClientRect();
+          return { ph: p.offsetHeight, pw: p.offsetWidth, x: r.x, ih: window.innerHeight };
+        });
+        if (Math.abs(box.ph - box.ih) > 2) throw new Error(`面板高 ${box.ph} ≠ 视口 ${box.ih}`);
+        if (Math.abs(box.pw - 380) > 2) throw new Error('面板宽异常: ' + box.pw);
+        if (Math.abs(box.x) > 2) throw new Error('未贴左缘: x=' + box.x);
+        return box.pw + 'x' + box.ph;
+      });
+      await step('侧栏输出框显著加大（高度 > 300px）且推文框可伸缩', async () => {
+        const box = await page.evaluate(() => {
+          const sr = document.querySelector('#xcc-host').shadowRoot;
+          return {
+            oh: sr.querySelector('.xcc-out').getBoundingClientRect().height,
+            th: sr.querySelector('.xcc-tweet-bd').getBoundingClientRect().height
+          };
+        });
+        if (box.oh <= 300) throw new Error('输出框太小: ' + box.oh);
+        if (box.th < 40) throw new Error('推文框异常: ' + box.th);
+        return 'out=' + Math.round(box.oh) + 'px tweet=' + Math.round(box.th) + 'px';
+      });
+      await step('面板打开时悬浮球隐藏，✕ 关闭后恢复', async () => {
+        if (!(await page.locator('.xcc-launcher').isHidden())) throw new Error('面板开着悬浮球未隐藏');
+        await page.locator('.xcc-panel [data-act="close"]').click();
+        if (await page.locator('.xcc-panel').isVisible()) throw new Error('✕ 未关闭面板');
+        if (!(await page.locator('.xcc-launcher').isVisible())) throw new Error('关闭后悬浮球未恢复');
+        await page.locator('.xcc-launcher').click(); // 重新打开，维持后续断言前提
+        await page.waitForTimeout(300);
+      });
+
       await page.screenshot({ path: path.join(here, 'panel.png') });
     }
 
@@ -350,6 +384,103 @@ const server = http.createServer((req, res) => {
           ' | genParams=' + JSON.stringify(body.messages && body.messages.length)
         );
       }
+    });
+
+    await step('清洗：剥 markdown/前言后语且保留 #hashtag，system 含格式硬约束', async () => {
+      mockLLM.reply =
+        '好的！以下是为你生成的评论：\n\n**面板输出已清洗测试**\n#评论副驾 的价值在格式。\n' +
+        '## 二级标题应被剥\n- 列表项一\n• 列表项二\n`代码片段`\n\n希望这条评论对你有所帮助。';
+      const before = mockLLM.count;
+      await page.bringToFront();
+      if (!(await page.locator('.xcc-panel').isVisible().catch(() => false))) {
+        await page.locator('.xcc-launcher').click();
+      }
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      await page.waitForFunction(() => {
+        const out = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-out');
+        return !!(out && out.value.includes('已清洗') && !out.value.includes('好的'));
+      }, null, { timeout: 20000 });
+      const v = await page.locator('.xcc-out').inputValue();
+      if (v.includes('**') || v.includes('`') || v.includes('## ') || v.includes('\n- ')
+        || v.includes('• ') || v.includes('好的') || v.includes('希望')) {
+        throw new Error('清洗不全: ' + v.slice(0, 80));
+      }
+      if (!v.includes('#评论副驾')) throw new Error('误杀 hashtag: ' + v.slice(0, 80));
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      if (!String(body.messages[0].content).includes('直接输出评论正文')) throw new Error('system 未含格式硬约束');
+      mockLLM.reply = null; // 复位，避免污染后续
+      return v.split('\n')[0].slice(0, 30);
+    });
+
+    await step('免费模式：system 注入 280 硬约束，计数器 n/280 超限标红', async () => {
+      mockLLM.reply = null; // 前一步若失败可能未复位
+      const before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15000 && mockLLM.count < before + 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (mockLLM.count < before + 1) throw new Error('请求未到达');
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      if (!body.messages.some((m) => /280\s*个?\s*字符/.test(String(m.content)))) {
+        throw new Error('免费模式未注入 280 硬约束');
+      }
+      const cnt = await page.locator('.xcc-count').innerText();
+      if (!/^\d+\/280$/.test(cnt)) throw new Error('计数器格式异常: ' + cnt);
+      await page.locator('.xcc-out').fill('a'.repeat(300));
+      await page.locator('.xcc-out').dispatchEvent('input');
+      const over = await page.locator('.xcc-count').evaluate((el) => el.classList.contains('over'));
+      if (!over) throw new Error('超 280 未标红');
+      if ((await page.locator('.xcc-target-len').isVisible())) throw new Error('免费模式不应显示目标字数');
+      return cnt;
+    });
+
+    await step('面板切换付费模式：目标字数输入出现并即时落盘', async () => {
+      await page.locator('.xcc-panel [data-act="plan-premium"]').click();
+      await page.waitForTimeout(600); // mutateSettings → storage.onChanged → refreshSettings
+      if (!(await page.locator('.xcc-target-len').isVisible())) throw new Error('付费目标字数输入未显示');
+      await page.locator('.xcc-target-len').fill('120');
+      await page.locator('.xcc-target-len').dispatchEvent('change');
+      await page.waitForTimeout(600);
+      // storage 读取走扩展页（普通网页主世界无 chrome.storage）
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      const saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.genParams.xPlan + '/' + settings.genParams.targetLength;
+      });
+      if (saved !== 'premium/120') throw new Error('未落盘: ' + saved);
+      const cnt = await page.locator('.xcc-count').innerText();
+      if (!/^\d+\s*字$/.test(cnt)) throw new Error('付费计数格式异常: ' + cnt);
+      return saved;
+    });
+
+    await step('付费模式：注入"目标约 120 字"且 280 约束消失；留空则无长度指令', async () => {
+      const before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      let t0 = Date.now();
+      while (Date.now() - t0 < 15000 && mockLLM.count < before + 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      let all = JSON.parse(mockLLM.lastBody || '{}').messages.map((m) => String(m.content)).join('\n');
+      if (!all.includes('目标约 120 字')) throw new Error('目标字数未注入');
+      if (/280\s*个?\s*字符/.test(all)) throw new Error('付费模式仍带 280 硬约束');
+
+      // 留空 → 无长度指令
+      await page.locator('.xcc-target-len').fill('');
+      await page.locator('.xcc-target-len').dispatchEvent('change');
+      await page.waitForTimeout(500);
+      const before2 = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      t0 = Date.now();
+      while (Date.now() - t0 < 15000 && mockLLM.count < before2 + 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      all = JSON.parse(mockLLM.lastBody || '{}').messages.map((m) => String(m.content)).join('\n');
+      if (all.includes('目标约')) throw new Error('留空仍注入了目标字数');
+      if (/280\s*个?\s*字符/.test(all)) throw new Error('留空错误回落到 280 约束');
+      // 收尾切回免费，避免污染后续步骤
+      await page.locator('.xcc-panel [data-act="plan-free"]').click();
+      await page.waitForTimeout(500);
     });
 
     await step('生成失败链路：4xx 原文透出并追加换模型提示', async () => {
@@ -528,6 +659,35 @@ const server = http.createServer((req, res) => {
         await chrome.storage.local.set({ settings });
       });
       oauthState.grant = false;
+    });
+
+    // v0.5.0 面板左右切换（storage.onChanged → applySettings → .right 类）
+    await step('面板位置切换：panelSide=right 贴右缘，恢复 left 贴左缘', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.panelSide = 'right';
+        await chrome.storage.local.set({ settings });
+      });
+      await page.bringToFront();
+      await page.waitForTimeout(700);
+      let r = await page.evaluate(() => {
+        const p = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-panel');
+        const b = p.getBoundingClientRect();
+        return { x: b.x, right: window.innerWidth - b.right };
+      });
+      if (Math.abs(r.right) > 2 || r.x < 100) throw new Error('未贴右缘: ' + JSON.stringify(r));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.panelSide = 'left';
+        await chrome.storage.local.set({ settings });
+      });
+      await page.waitForTimeout(700);
+      r = await page.evaluate(() => {
+        const p = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-panel');
+        return { x: p.getBoundingClientRect().x };
+      });
+      if (Math.abs(r.x) > 2) throw new Error('未恢复左缘: x=' + r.x);
     });
 
     // 健康页免疫：切标签/事件触发绝不自愈（问题1 回归门禁）

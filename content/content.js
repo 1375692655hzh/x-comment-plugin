@@ -55,7 +55,7 @@
         Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
     button { cursor: pointer; }
     .xcc-launcher {
-      position: fixed; right: 16px; top: 42%;
+      position: fixed; left: 16px; top: 42%;
       width: 44px; height: 44px; border-radius: 50%;
       border: none; color: #fff; font-size: 20px; line-height: 1;
       background: linear-gradient(135deg, #8b5cfa, #4f46e5);
@@ -63,6 +63,7 @@
       z-index: 2147483000; transition: transform .12s ease;
     }
     .xcc-launcher:hover { transform: scale(1.08); }
+    .xcc-launcher.right { left: auto; right: 16px; }
     .xcc-hover-btn {
       position: fixed; display: none;
       width: 26px; height: 26px; border-radius: 8px;
@@ -72,14 +73,23 @@
       box-shadow: 0 2px 8px rgba(0,0,0,.35);
       z-index: 2147483000;
     }
+    /* v0.5.0：全高侧边栏（SoPilot 式），默认停靠左侧，.right 切右侧 */
     .xcc-panel {
-      position: fixed; right: 16px; bottom: 16px;
-      width: 332px; max-height: calc(100vh - 32px); overflow: auto;
-      background: rgba(21, 24, 31, .97); color: #e7e9ea;
-      border: 1px solid rgba(255,255,255,.12); border-radius: 16px;
+      position: fixed; top: 0; bottom: 0; left: 0;
+      width: 380px; height: 100vh;
+      background: rgba(21, 24, 31, .98); color: #e7e9ea;
+      border: 1px solid rgba(255,255,255,.12); border-left: none;
+      border-radius: 0 16px 16px 0;
       padding: 14px; z-index: 2147483000;
-      box-shadow: 0 12px 40px rgba(0,0,0,.5);
+      box-shadow: 8px 0 32px rgba(0, 0, 0, .5);
       display: flex; flex-direction: column; gap: 8px;
+      overflow: hidden; /* 滚动下放给内部滚动区（推文框/输出框） */
+    }
+    .xcc-panel.right {
+      left: auto; right: 0;
+      border-left: 1px solid rgba(255,255,255,.12); border-right: none;
+      border-radius: 16px 0 0 16px;
+      box-shadow: -8px 0 32px rgba(0, 0, 0, .5);
     }
     /* .xcc-panel 的 display:flex 会盖掉浏览器默认的 [hidden]{display:none}，必须显式声明 */
     .xcc-panel[hidden] { display: none; }
@@ -110,24 +120,40 @@
     .xcc-tweet {
       border: 1px dashed rgba(255,255,255,.18); border-radius: 10px;
       padding: 8px 10px; font-size: 12px;
+      flex: 1 1 0; min-height: 72px; max-height: 190px;
+      display: flex; flex-direction: column; overflow: hidden;
     }
     .xcc-tweet-hd {
       display: flex; justify-content: space-between; align-items: center;
       color: #9ca3af; font-size: 11px; margin-bottom: 4px;
     }
+    /* 已捕获推文：弹性伸展 + 内部滚动（v0.5.0 侧栏形态，内容多时自己滚） */
     .xcc-tweet-bd { color: #d1d5db; white-space: pre-wrap; word-break: break-word;
-      max-height: 88px; overflow: auto; line-height: 1.45; }
+      flex: 1 1 auto; overflow: auto; line-height: 1.45; }
+    .xcc-plan-row { display: flex; gap: 6px; }
+    .xcc-plan-btn {
+      flex: 1; border-radius: 9px; padding: 6px 0; font-size: 12px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.05); color: #9ca3af;
+    }
+    .xcc-plan-btn.on { color: #fff; border-color: #7c8ff5; background: rgba(124,143,245,.18); }
+    input.xcc-target-len { padding: 6px 8px; font-size: 12.5px; height: 30px; }
     .xcc-gen-btn {
       border: none; border-radius: 10px; padding: 9px 0;
       color: #fff; font-size: 14px; font-weight: 600;
       background: linear-gradient(135deg, #8b5cfa, #4f46e5);
     }
     .xcc-gen-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .xcc-out-bar { display: flex; justify-content: flex-end; flex: 0 0 auto; }
+    .xcc-count { font-size: 11px; color: #9ca3af; }
+    .xcc-count.over { color: #f87171; font-weight: 600; }
+    /* 生成输出框：v0.5.0 侧栏形态的主区，弹性伸展且占比最大（约为推文框 2.4 倍） */
     textarea.xcc-out {
       background: rgba(255,255,255,.04); color: #e7e9ea;
       border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
-      padding: 9px 10px; font-size: 13px; min-height: 84px; resize: vertical;
-      outline: none; line-height: 1.5;
+      padding: 9px 10px; font-size: 13px;
+      flex: 2.4 1 0; min-height: 260px; resize: none;
+      outline: none; line-height: 1.5; overflow: auto;
     }
     textarea.xcc-out:focus { border-color: #7c8ff5; }
     .xcc-row { display: flex; gap: 6px; }
@@ -163,6 +189,12 @@
     <select class="xcc-persona"></select>
     <label class="xcc-lb">生成风格</label>
     <select class="xcc-gen"></select>
+    <div class="xcc-plan-row">
+      <button class="xcc-plan-btn" data-act="plan-free">免费 · ≤280 字符</button>
+      <button class="xcc-plan-btn" data-act="plan-premium">付费 · 不限长</button>
+    </div>
+    <input class="xcc-target-len" type="number" min="1" max="2000"
+      placeholder="目标字数（选填，如 120，模糊参考）" hidden>
     <div class="xcc-tweet">
       <div class="xcc-tweet-hd">
         <span>已捕获推文</span>
@@ -172,6 +204,7 @@
     </div>
     <input class="xcc-topic" placeholder="或输入主题（生成原创推文用）">
     <button class="xcc-gen-btn">✦ 生成</button>
+    <div class="xcc-out-bar"><span class="xcc-count">0/280</span></div>
     <textarea class="xcc-out" placeholder="生成结果（可手动修改后再填入）"></textarea>
     <div class="xcc-row">
       <button class="xcc-main" data-act="insert">填入回复框</button>
@@ -190,11 +223,15 @@
     update: shadow.querySelector('.xcc-update'),
     personaSel: shadow.querySelector('.xcc-persona'),
     genSel: shadow.querySelector('.xcc-gen'),
+    planFree: shadow.querySelector('[data-act="plan-free"]'),
+    planPremium: shadow.querySelector('[data-act="plan-premium"]'),
+    targetLen: shadow.querySelector('.xcc-target-len'),
     tweetBd: shadow.querySelector('.xcc-tweet-bd'),
     topic: shadow.querySelector('.xcc-topic'),
     genBtn: shadow.querySelector('.xcc-gen-btn'),
     insertBtn: shadow.querySelector('.xcc-row [data-act="insert"]'),
     out: shadow.querySelector('.xcc-out'),
+    count: shadow.querySelector('.xcc-count'),
     status: shadow.querySelector('.xcc-status')
   };
 
@@ -242,11 +279,46 @@
         '）。点右上角 ⚙ 打开设置完成配置后再生成';
   }
 
+  // 账号模式渲染：免费/付费按钮态 + 目标字数输入框显隐 + 计数器刷新
+  function renderPlan() {
+    const gp = (state.settings && state.settings.genParams) || {};
+    const premium = gp.xPlan === 'premium';
+    if (els.planFree) els.planFree.classList.toggle('on', !premium);
+    if (els.planPremium) els.planPremium.classList.toggle('on', premium);
+    if (els.targetLen) {
+      els.targetLen.hidden = !premium;
+      if (premium && document.activeElement !== els.targetLen) {
+        els.targetLen.value = gp.targetLength || '';
+      }
+    }
+    updateCount();
+  }
+
+  // 输出框字符计数：免费 n/280（超限标红仅提示不截断）；付费 n 字
+  function updateCount() {
+    if (!els.count) return;
+    const gp = (state.settings && state.settings.genParams) || {};
+    const n = els.out.value.length;
+    if (gp.xPlan === 'premium') {
+      els.count.textContent = n + ' 字';
+      els.count.classList.remove('over');
+    } else {
+      els.count.textContent = n + '/280';
+      els.count.classList.toggle('over', n > 280);
+    }
+  }
+
+  // 悬浮球显隐：设置启用 且 面板关闭 时可见（面板开着时让位）
+  function syncLauncher() {
+    const enabled = !(state.settings && state.settings.enabled === false);
+    els.launcher.style.display = enabled && els.panel.hidden ? '' : 'none';
+    els.launcher.classList.toggle('right', (state.settings && state.settings.panelSide) === 'right');
+  }
+
   function applySettings(pub) {
     state.settings = pub;
-    const enabled = pub.enabled !== false;
-    els.launcher.style.display = enabled ? '' : 'none';
-    if (!enabled) els.panel.hidden = true;
+    if (pub.enabled === false) els.panel.hidden = true;
+    els.panel.classList.toggle('right', pub.panelSide === 'right');
     fillSelect(els.personaSel, pub.personaPresets, pub.activePersonaId);
     fillSelect(els.genSel, pub.genPresets, pub.activeGenId);
     const ok = pub.ready && pub.ready[pub.provider];
@@ -260,7 +332,9 @@
     if (show) {
       els.update.textContent = '🆕 有新版 v' + upd.latest + '：点击下载 ZIP，解压替换后重新加载扩展';
     }
+    renderPlan();
     syncGenBtn();
+    syncLauncher();
   }
 
   async function refreshSettings() {
@@ -301,6 +375,7 @@
   els.launcher.addEventListener('click', () => {
     els.panel.hidden = !els.panel.hidden;
     if (!els.panel.hidden) refreshSettings();
+    syncLauncher();
   });
 
   // ---------- 悬停推文捕获 ----------
@@ -352,6 +427,7 @@
     captureTweet(hoverArticle);
     els.panel.hidden = false;
     refreshSettings();
+    syncLauncher();
   });
 
   function extractTweet(art) {
@@ -443,6 +519,7 @@
         els.out.value = r.text;
         state.generatedFor = target;
         setStatus('已生成，可编辑后填入');
+        updateCount();
       } else if (!r) {
         setStatus('生成失败：扩展后台无响应，请到扩展管理页「重新加载」扩展后刷新本页重试', true);
       } else {
@@ -754,6 +831,7 @@
       if (!w) send({ type: 'OPEN_OPTIONS' });
     } else if (act === 'close') {
       els.panel.hidden = true;
+      syncLauncher();
     } else if (act === 'clear') {
       state.captured = null;
       state.generatedFor = null;
@@ -766,6 +844,14 @@
       setStatus('已复制');
     } else if (act === 'regen') {
       generate();
+    } else if (act === 'plan-free' || act === 'plan-premium') {
+      const v = act === 'plan-premium' ? 'premium' : 'free';
+      // 本地即时切换（不等 storage 往返），落盘后 onChanged 会再同步一次
+      if (state.settings && state.settings.genParams) state.settings.genParams.xPlan = v;
+      renderPlan();
+      mutateSettings((m) => {
+        m.genParams.xPlan = v;
+      }).catch(() => {});
     }
   });
 
@@ -781,6 +867,21 @@
       m.activeGenId = v;
     }).catch(() => {});
   });
+
+  // 目标字数（付费模式）：即时落盘；输入时仅允许数字
+  els.targetLen.addEventListener('input', () => {
+    els.targetLen.value = els.targetLen.value.replace(/\D/g, '').slice(0, 4);
+  });
+  els.targetLen.addEventListener('change', () => {
+    const v = els.targetLen.value.trim();
+    if (state.settings && state.settings.genParams) state.settings.genParams.targetLength = v;
+    mutateSettings((m) => {
+      m.genParams.targetLength = v;
+    }).catch(() => {});
+  });
+
+  // 输出框编辑时实时刷新字符计数
+  els.out.addEventListener('input', updateCount);
 
   // 设置在别处（设置页/弹窗）被改动时同步面板
   chrome.storage.onChanged.addListener((changes, area) => {

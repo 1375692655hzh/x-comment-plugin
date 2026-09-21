@@ -249,10 +249,64 @@ async function xccChatCompletion(cfg, messages, genParams) {
       ? data.choices[0].message.content
       : null;
   if (!text) throw new Error('模型未返回内容：' + JSON.stringify(data).slice(0, 200));
-  let out = String(text).trim();
-  out = out.replace(/^```[a-zA-Z]*\s*\n?/, '').replace(/\n?```\s*$/, '');
-  if ((out.startsWith('"') && out.endsWith('"')) || (out.startsWith('\u201c') && out.endsWith('\u201d'))) {
-    out = out.slice(1, -1);
+  return xccCleanReplyText(String(text));
+}
+
+// ---------- 输出清洗：剥 AI 格式残留（保守原则：宁可少剥，不误杀正文） ----------
+// 同时服务于生成与 options 连通测试（期望原样返回 pong）：
+// 所有规则都要求"成对出现/成段存在/剥后仍有内容"，pong 一条都不会命中。
+function xccCleanReplyText(raw) {
+  let s = String(raw).trim();
+  if (!s) return s;
+
+  // 1) 代码围栏：仅首尾成对时剥壳（语言标记放宽到含 - _ +）
+  s = s.replace(/^```[a-zA-Z0-9_+-]*[ \t]*\r?\n?/, '').replace(/\r?\n?[ \t]*```$/, '');
+
+  // 2) 整条引号包裹：内部不得再出现同类引号（防误判对话体引语）
+  for (const [q1, q2] of [
+    ['"', '"'],
+    ['\u201c', '\u201d']
+  ]) {
+    if (s.length > 1 && s.startsWith(q1) && s.endsWith(q2) && !s.slice(1, -1).includes(q1)) {
+      s = s.slice(1, -1).trim();
+    }
   }
-  return out.trim();
+
+  // 3) 整条 **加粗** 包裹（最常见的 AI 输出残留）：首尾成对且剥后非空，只剥一层
+  if (/^\*\*[\s\S]+\*\*$/.test(s) && s.slice(2, -2).trim()) {
+    s = s.slice(2, -2).trim();
+  }
+
+  // 4) 前言套话：第一行是"好的，以下是…评论："类引导语（以冒号/感叹号收尾）才整行丢弃
+  const intro = s.split(/\r?\n/)[0] || '';
+  if (
+    intro.trim().length <= 40 &&
+    /^(好的|当然|没问题|明白|收到)[，,!！。.\s]*(以下|这是)?|(以下|这是)(为(你|您))?(撰写|生成|准备|创作)的?[^\n]{0,12}(评论|回复|推文|内容)[：:!！]\s*$/.test(
+      intro.trim()
+    ) &&
+    s.slice(intro.length).trim()
+  ) {
+    s = s.slice(intro.length).trim();
+  }
+
+  // 5) 后缀套话：结尾一句是"希望…有帮助"类才丢弃，剥后必须仍有正文
+  const tail = /(希望|但愿|祝)[^\n]{0,30}(对你|们)?(有所)?(帮助|用处|有用|喜欢)[。.!！]?\s*$/.exec(s);
+  if (tail && s.slice(0, tail.index).trim()) {
+    s = s.slice(0, tail.index).trim();
+  }
+
+  // 6) 行内 **加粗** → 纯文字：单行内成对、中间非空才动（跨行加粗不动，防误杀长强调段）
+  s = s.replace(/(^|[^*])\*\*([^*\n]+)\*\*(?!\*)/g, '$1$2');
+
+  // 7) 行首 ATX 标题：#{1..6} 后必须跟空格才剥；#hashtag（#后无空格）永不命中
+  s = s.replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '');
+
+  // 8) 行首列表符：-/•/*/· 后必须跟空格才剥（"-5°C"、"a-b" 不受影响）
+  s = s.replace(/^[ \t]{0,3}[-*•·][ \t]+/gm, '');
+
+  // 9) 行内 `code`：单行内成对单反引号才剥（双/三反引号不动）
+  s = s.replace(/(^|[^`])`([^`\n]+)`(?!`)/g, '$1$2');
+
+  // 10) 3+ 连续空行压成 1 个空行
+  return s.replace(/\n{3,}/g, '\n\n').trim();
 }
