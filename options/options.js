@@ -386,7 +386,7 @@ function initUpdateBanner() {
     const { xccUpdate } = await chrome.storage.local.get('xccUpdate');
     renderUpdateBanner(xccUpdate);
   })();
-  $('update-open').addEventListener('click', () => send({ type: 'OPEN_DOWNLOAD' }));
+  $('update-open').addEventListener('click', () => window.open(XCC_ZIP_URL, '_blank'));
   $('update-check').addEventListener('click', async () => {
     const r = await send({ type: 'CHECK_UPDATE' });
     if (r.ok) renderUpdateBanner(r.update);

@@ -40,7 +40,7 @@
   const shadow = host.attachShadow({ mode: 'open' });
   shadow.innerHTML = `
   <style>
-    :host { all: initial; }
+    :host { all: initial; color-scheme: dark; }
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
         Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
     button { cursor: pointer; }
@@ -95,6 +95,8 @@
       padding: 7px 8px; font-size: 13px; outline: none; width: 100%;
     }
     select:focus, input.xcc-topic:focus { border-color: #7c8ff5; }
+    /* 原生下拉列表默认走系统浅色渲染，会白底配浅字看不清：强制深色 */
+    select option { background: #1f2733; color: #e7e9ea; }
     .xcc-tweet {
       border: 1px dashed rgba(255,255,255,.18); border-radius: 10px;
       padding: 8px 10px; font-size: 12px;
@@ -488,9 +490,11 @@
 
   // ---------- 事件绑定 ----------
 
-  els.update.addEventListener('click', () => {
-    send({ type: 'OPEN_DOWNLOAD' });
-  });
+  if (els.update) {
+    els.update.addEventListener('click', () => {
+      window.open(XCC_ZIP_URL, '_blank');
+    });
+  }
 
   els.genBtn.addEventListener('click', generate);
 
@@ -499,7 +503,8 @@
     if (!btn) return;
     const act = btn.dataset.act;
     if (act === 'settings') {
-      send({ type: 'OPEN_OPTIONS' });
+      // 直接打开扩展页，不走后台消息（后台休眠/异常时也能打开）
+      window.open(chrome.runtime.getURL('options/options.html'), '_blank');
     } else if (act === 'close') {
       els.panel.hidden = true;
     } else if (act === 'clear') {

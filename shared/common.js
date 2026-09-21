@@ -117,3 +117,7 @@ function xccMergeSettings(saved) {
 function xccUid(prefix) {
   return prefix + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
+
+// 最新版 ZIP 下载地址（更新提示直达用，content/options 直接 window.open）
+const XCC_ZIP_URL =
+  'https://github.com/1375692655hzh/x-comment-plugin/archive/refs/heads/main.zip';

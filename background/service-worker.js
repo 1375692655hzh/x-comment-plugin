@@ -323,10 +323,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const info = await checkUpdate();
         return sendResponse({ ok: true, update: info });
       }
-      case 'OPEN_DOWNLOAD': {
-        chrome.tabs.create({ url: XCC_ZIP_URL });
-        return sendResponse({ ok: true });
-      }
       case 'SAVE_ACTIVE': {
         const patch = {};
         if (msg.personaId) patch.activePersonaId = msg.personaId;
