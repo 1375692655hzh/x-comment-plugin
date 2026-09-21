@@ -121,3 +121,27 @@ function xccUid(prefix) {
 // 最新版 ZIP 下载地址（更新提示直达用，content/options 直接 window.open）
 const XCC_ZIP_URL =
   'https://github.com/1375692655hzh/x-comment-plugin/archive/refs/heads/main.zip';
+
+// 脱敏的公开配置视图（content/popup 直接本地计算，不依赖后台 SW）
+function xccPublicSettings(s) {
+  const label =
+    s.provider === 'xai'
+      ? 'xAI API · ' + s.xai.model
+      : s.provider === 'custom'
+        ? '自定义 · ' + s.custom.model
+        : 'Grok 授权 · ' + s.grokOAuth.model;
+  return {
+    enabled: s.enabled !== false,
+    provider: s.provider,
+    providerLabel: label,
+    ready: {
+      xai: !!s.xai.apiKey,
+      custom: !!s.custom.baseUrl,
+      'grok-oauth': !!(s.grokOAuth.tokens && s.grokOAuth.tokens.access_token)
+    },
+    personaPresets: s.personaPresets,
+    genPresets: s.genPresets,
+    activePersonaId: s.activePersonaId,
+    activeGenId: s.activeGenId
+  };
+}

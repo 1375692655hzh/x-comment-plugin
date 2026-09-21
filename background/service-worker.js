@@ -281,65 +281,29 @@ async function refreshGrokToken(o) {
   throw new Error('刷新 Grok 授权失败，请重新登录');
 }
 
-// ---------- 面向页面的脱敏配置 ----------
-
-function publicSettings(s) {
-  const label =
-    s.provider === 'xai'
-      ? 'xAI API · ' + s.xai.model
-      : s.provider === 'custom'
-        ? '自定义 · ' + s.custom.model
-        : 'Grok 授权 · ' + s.grokOAuth.model;
-  return {
-    enabled: s.enabled !== false,
-    provider: s.provider,
-    providerLabel: label,
-    // 键名与 provider 的取值一致（xai / custom / grok-oauth），消费端用 pub.ready[pub.provider]
-    ready: {
-      xai: !!s.xai.apiKey,
-      custom: !!s.custom.baseUrl, // Ollama 等本地无 Key 接口同样视为已配置
-      'grok-oauth': !!(s.grokOAuth.tokens && s.grokOAuth.tokens.access_token)
-    },
-    personaPresets: s.personaPresets,
-    genPresets: s.genPresets,
-    activePersonaId: s.activePersonaId,
-    activeGenId: s.activeGenId
-  };
-}
-
 // ---------- 消息路由 ----------
+// 注意：GET_PUBLIC_SETTINGS / SAVE_ACTIVE 已移除——content/popup 直接读写
+// chrome.storage（common.js 的 xccMergeSettings/xccPublicSettings 本地计算），
+// 后台只负责必须走它的三件事：调模型、OAuth 设备流、更新检测。
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     switch (msg && msg.type) {
-      case 'GET_PUBLIC_SETTINGS': {
-        const store = await chrome.storage.local.get(['settings', 'xccUpdate']);
-        return sendResponse({
-          ok: true,
-          settings: { ...publicSettings(xccMergeSettings(store.settings)), update: store.xccUpdate || null }
-        });
-      }
-      case 'CHECK_UPDATE': {
-        const info = await checkUpdate();
-        return sendResponse({ ok: true, update: info });
-      }
-      case 'SAVE_ACTIVE': {
-        const patch = {};
-        if (msg.personaId) patch.activePersonaId = msg.personaId;
-        if (msg.genId) patch.activeGenId = msg.genId;
-        await updateSettings(patch);
-        return sendResponse({ ok: true });
-      }
-      case 'OPEN_OPTIONS': {
-        chrome.runtime.openOptionsPage();
-        return sendResponse({ ok: true });
-      }
       case 'GENERATE': {
         const s = await getSettings();
         const cfg = await resolveProviderCfg(s);
         const messages = buildMessages(s, msg);
         const text = await chatCompletion(cfg, messages, s.genParams);
         return sendResponse({ ok: true, text });
+      }
+      case 'OPEN_OPTIONS': {
+        // 设置按钮的兜底路径（正常路径是 content 直接 window.open 扩展页）
+        chrome.runtime.openOptionsPage();
+        return sendResponse({ ok: true });
+      }
+      case 'CHECK_UPDATE': {
+        const info = await checkUpdate();
+        return sendResponse({ ok: true, update: info });
       }
       case 'TEST_PROVIDER': {
         const s = await getSettings();

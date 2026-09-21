@@ -2,3 +2,6 @@
 Thumbs.db
 desktop.ini
 *.log
+tools/smoke/ext/
+tools/smoke/profile/
+tools/smoke/panel.png

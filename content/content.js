@@ -235,8 +235,29 @@
   }
 
   async function refreshSettings() {
-    const r = await send({ type: 'GET_PUBLIC_SETTINGS' });
-    if (r && r.ok) applySettings(r.settings);
+    // 直接读 chrome.storage，不经过后台消息——
+    // Edge 对扩展后台的休眠/唤醒不可靠，UI 功能不能依赖它
+    try {
+      const store = await chrome.storage.local.get(['settings', 'xccUpdate']);
+      const pub = {
+        ...xccPublicSettings(xccMergeSettings(store.settings)),
+        update: store.xccUpdate || null
+      };
+      applySettings(pub);
+    } catch (e) {
+      if (!state.settings) {
+        els.provider.textContent = '⚠ 设置读取失败：请在扩展管理页点「重新加载」后刷新页面';
+        els.provider.classList.add('warn');
+        setTimeout(refreshSettings, 5000);
+      }
+    }
+  }
+
+  async function mutateSettings(fn) {
+    const { settings } = await chrome.storage.local.get('settings');
+    const m = xccMergeSettings(settings);
+    fn(m);
+    await chrome.storage.local.set({ settings: m });
   }
 
   // ---------- 面板开关 ----------
@@ -251,7 +272,9 @@
   let hoverArticle = null;
 
   function isEnabled() {
-    return !!(state.settings && state.settings.enabled !== false);
+    // fail-open：设置尚未加载成功时按"启用"处理，只有明确关闭才禁用，
+    // 避免后台消息偶发失败导致悬停捕获/面板整体失效
+    return !(state.settings && state.settings.enabled === false);
   }
 
   document.addEventListener(
@@ -345,7 +368,11 @@
     // 避免生成等待期间误触捕获其他推文导致回错帖
     const target = state.captured;
     try {
-      const r = await send({ type: 'GENERATE', tweet: target, topic: topic || null });
+      // 生成是唯一必须走后台的链路，加超时兜底（后台被 Edge 休眠唤醒失败时不至于永远转圈）
+      const r = await Promise.race([
+        send({ type: 'GENERATE', tweet: target, topic: topic || null }),
+        sleep(60000).then(() => null)
+      ]);
       if (r && r.ok) {
         els.out.value = r.text;
         state.generatedFor = target;
@@ -503,8 +530,10 @@
     if (!btn) return;
     const act = btn.dataset.act;
     if (act === 'settings') {
-      // 直接打开扩展页，不走后台消息（后台休眠/异常时也能打开）
-      window.open(chrome.runtime.getURL('options/options.html'), '_blank');
+      // web_accessible_resources 已声明本页可从 x.com 打开；
+      // 若仍被拦截（返回 null），回退到后台 openOptionsPage
+      const w = window.open(chrome.runtime.getURL('options/options.html'), '_blank');
+      if (!w) send({ type: 'OPEN_OPTIONS' });
     } else if (act === 'close') {
       els.panel.hidden = true;
     } else if (act === 'clear') {
@@ -523,10 +552,16 @@
   });
 
   els.personaSel.addEventListener('change', () => {
-    send({ type: 'SAVE_ACTIVE', personaId: els.personaSel.value });
+    const v = els.personaSel.value;
+    mutateSettings((m) => {
+      m.activePersonaId = v;
+    }).catch(() => {});
   });
   els.genSel.addEventListener('change', () => {
-    send({ type: 'SAVE_ACTIVE', genId: els.genSel.value });
+    const v = els.genSel.value;
+    mutateSettings((m) => {
+      m.activeGenId = v;
+    }).catch(() => {});
   });
 
   // 设置在别处（设置页/弹窗）被改动时同步面板

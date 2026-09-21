@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>fake x.com — smoke test</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 600px; margin: 24px auto; background: #fff; color: #111; }
+  article { border: 1px solid #e0e0e0; border-radius: 12px; padding: 12px; margin-bottom: 14px; }
+  .uname { font-weight: 700; }
+  .handle { color: #536471; }
+  .tweet-text { margin: 6px 0; }
+  .actions { display: flex; gap: 18px; margin-top: 8px; }
+  .actions button { cursor: pointer; }
+  #composer { border: 2px solid #1d9bf0; border-radius: 10px; min-height: 44px; padding: 8px; margin-bottom: 18px; }
+  #modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100; }
+  #modal .card { background: #fff; margin: 90px auto; width: 420px; padding: 18px; border-radius: 12px; }
+  #modal-editor { border: 1px solid #ccc; min-height: 64px; padding: 6px; }
+</style>
+</head>
+<body>
+
+<div id="composer" data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+
+<article data-testid="tweet">
+  <div data-testid="User-Name">
+    <div><span class="uname">Alpha</span></div>
+    <div><span class="handle">@alpha</span></div>
+  </div>
+  <div class="tweet-text" data-testid="tweetText">Grok 4.5 的上下文长度翻倍了，长文档分析终于不用切片。</div>
+  <a href="/alpha/status/1001"><time>2h</time></a>
+  <div class="actions">
+    <button data-testid="reply">回复</button>
+    <button>转发</button>
+  </div>
+</article>
+
+<article data-testid="tweet">
+  <div data-testid="User-Name">
+    <div><span class="uname">Beta</span></div>
+    <div><span class="handle">@beta</span></div>
+  </div>
+  <div class="tweet-text" data-testid="tweetText">独立开发者的黄金时代：模型能力每半年翻一倍，而分发渠道还是老三样。</div>
+  <a href="/beta/status/2002"><time>4h</time></a>
+  <div class="actions">
+    <button data-testid="reply">回复</button>
+    <button>转发</button>
+  </div>
+</article>
+
+<div id="modal" role="dialog">
+  <div class="card">
+    <div id="modal-editor" data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
+  </div>
+</div>
+
+<script>
+  // 模拟 X：点「回复」弹出带编辑器的对话框
+  document.querySelectorAll('[data-testid="reply"]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.getElementById('modal').style.display = 'block';
+    });
+  });
+</script>
+</body>
+</html>
