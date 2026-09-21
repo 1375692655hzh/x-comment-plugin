@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="head">
+    <span>✦ X 评论副驾</span>
+    <button id="open-options" class="mini" title="打开设置">⚙</button>
+  </div>
+  <div class="row toggle-row">
+    <span>启用悬浮助手</span>
+    <input type="checkbox" id="enabled">
+  </div>
+  <div id="provider-label" class="muted">—</div>
+  <label class="lb">人设</label>
+  <select id="persona"></select>
+  <label class="lb">生成风格</label>
+  <select id="gen"></select>
+  <button id="open-x" class="ghost">打开 X</button>
+
+  <script src="../shared/common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

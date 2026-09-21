@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "X 评论副驾 (X Comment Copilot)",
+  "version": "0.1.0",
+  "description": "在 X/Twitter 上识别推文，用自定义「人设 + 生成」提示词一键生成高质量回复。支持 xAI API Key、任意 OpenAI 兼容接口或 Grok 账号授权。",
+  "permissions": ["storage"],
+  "host_permissions": ["https://api.x.ai/*", "https://accounts.x.ai/*"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["shared/common.js", "content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options/options.html",
+  "action": {
+    "default_title": "X 评论副驾",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

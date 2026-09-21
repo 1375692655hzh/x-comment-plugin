@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>X 评论副驾 · 设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+<main class="wrap">
+  <h1>✦ X 评论副驾 · 设置</h1>
+
+  <!-- ========== 模型接入 ========== -->
+  <section class="card">
+    <h2>模型接入</h2>
+    <div class="provider-list">
+      <label class="provider-item">
+        <input type="radio" name="provider" value="xai">
+        <span class="pi-body"><b>xAI API Key</b><i>console.x.ai 申请，开箱即用</i></span>
+      </label>
+      <label class="provider-item">
+        <input type="radio" name="provider" value="custom">
+        <span class="pi-body"><b>自定义 OpenAI 兼容接口</b><i>OpenAI / DeepSeek / Kimi / OpenRouter / Ollama 等</i></span>
+      </label>
+      <label class="provider-item">
+        <input type="radio" name="provider" value="grok-oauth">
+        <span class="pi-body"><b>Grok 账号授权（Beta）</b><i>grok CLI 同款设备码登录，走账号额度</i></span>
+      </label>
+    </div>
+
+    <div class="provider-pane" id="pane-xai">
+      <div class="field"><label>API Key</label>
+        <input type="password" id="xai-key" placeholder="在 console.x.ai 创建，xai- 开头"></div>
+      <div class="field"><label>模型</label>
+        <input id="xai-model" list="xai-models">
+        <datalist id="xai-models">
+          <option value="grok-4-fast-non-reasoning"></option>
+          <option value="grok-4-fast-reasoning"></option>
+          <option value="grok-4"></option>
+          <option value="grok-3"></option>
+          <option value="grok-3-mini"></option>
+        </datalist>
+      </div>
+      <div class="row"><button class="primary" id="xai-save">保存并测试</button>
+        <span class="hint" id="xai-status"></span></div>
+    </div>
+
+    <div class="provider-pane" id="pane-custom" hidden>
+      <div class="field"><label>接口地址（Base URL）</label>
+        <input id="custom-base" placeholder="https://api.openai.com/v1"></div>
+      <div class="field"><label>API Key</label>
+        <input type="password" id="custom-key" placeholder="sk-..."></div>
+      <div class="field"><label>模型</label>
+        <input id="custom-model" placeholder="gpt-4o-mini / deepseek-chat / moonshot-v1-8k ..."></div>
+      <div class="row"><button class="primary" id="custom-save">保存并测试</button>
+        <span class="hint" id="custom-status"></span></div>
+      <p class="hint">常用：OpenAI https://api.openai.com/v1 · DeepSeek https://api.deepseek.com/v1 ·
+        Kimi https://api.moonshot.cn/v1 · OpenRouter https://openrouter.ai/api/v1 ·
+        Ollama 本地 http://localhost:11434/v1</p>
+    </div>
+
+    <div class="provider-pane" id="pane-oauth" hidden>
+      <div class="field"><label>Client ID</label>
+        <input id="oauth-client-id" placeholder="从 grok CLI 开源仓库获取（见 README）"></div>
+      <div class="field"><label>模型</label>
+        <input id="oauth-model" list="xai-models"></div>
+      <details>
+        <summary class="hint">高级：端点与权限（端点有变时在此更正）</summary>
+        <div class="field"><label>API Base</label><input id="oauth-api-base"></div>
+        <div class="field"><label>Device 端点</label><input id="oauth-device"></div>
+        <div class="field"><label>Token 端点</label><input id="oauth-token"></div>
+        <div class="field"><label>Scope</label><input id="oauth-scope"></div>
+      </details>
+      <div class="row">
+        <button class="primary" id="oauth-start">保存并开始授权</button>
+        <button id="oauth-logout" hidden>登出</button>
+        <span class="hint" id="oauth-status"></span>
+      </div>
+      <div class="oauth-area" id="oauth-area" hidden>
+        <p>请打开下方链接，输入该代码完成登录授权：</p>
+        <div class="oauth-code" id="oauth-code">----</div>
+        <a id="oauth-link" target="_blank" rel="noreferrer"></a>
+        <p class="hint">等待授权中，此页面请保持打开…</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 人设提示词 ========== -->
+  <section class="card">
+    <h2>人设提示词 <button class="small" id="add-persona">＋ 新增</button></h2>
+    <p class="hint">定义「你是谁」：语气、身份、领域、表达习惯。生成时作为 system 提示词，单选一个为当前使用。</p>
+    <div id="persona-list"></div>
+  </section>
+
+  <!-- ========== 生成提示词 ========== -->
+  <section class="card">
+    <h2>生成提示词 <button class="small" id="add-gen">＋ 新增</button></h2>
+    <p class="hint">定义「怎么写」。占位符：<code>{tweet_text}</code> 推文内容、<code>{author}</code> 作者、<code>{topic}</code> 主题。
+      未放置占位符时会自动把推文/主题附在提示词末尾。</p>
+    <div id="gen-list"></div>
+  </section>
+
+  <!-- ========== 生成参数 ========== -->
+  <section class="card">
+    <h2>生成参数</h2>
+    <div class="field"><label>创造性（temperature：<span id="temp-val">0.9</span>）</label>
+      <input type="range" id="temp" min="0" max="1.5" step="0.1" value="0.9"></div>
+    <div class="field"><label>最大生成长度（max_tokens）</label>
+      <input type="number" id="maxtok" min="50" max="2000" step="50" value="400"></div>
+    <div class="field"><label>语言</label>
+      <select id="lang">
+        <option value="auto">跟随推文语言（默认）</option>
+        <option value="zh">强制中文</option>
+        <option value="en">强制英文</option>
+      </select></div>
+    <div class="row"><button class="primary" id="params-save">保存参数</button>
+      <span class="hint" id="params-status"></span></div>
+  </section>
+
+  <p class="foot">所有配置仅保存在本地（chrome.storage.local），API Key 不上传任何第三方服务器，接口请求由扩展后台直达你所选的服务商。</p>
+</main>
+
+<div id="toast" class="toast"></div>
+<script src="../shared/common.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

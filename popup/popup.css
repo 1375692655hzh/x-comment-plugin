@@ -1,0 +1,27 @@
+body {
+  width: 240px; margin: 0; padding: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px; color: #111827;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; }
+.mini {
+  background: transparent; border: none; font-size: 14px;
+  color: #6b7280; padding: 2px 6px; border-radius: 6px; cursor: pointer;
+}
+.mini:hover { background: #f3f4f6; }
+.row { display: flex; justify-content: space-between; align-items: center; }
+.toggle-row input { width: auto; }
+.muted { font-size: 11.5px; color: #6b7280; }
+.lb { font-size: 11.5px; color: #6b7280; }
+select {
+  padding: 6px 8px; font-size: 12.5px; border: 1px solid #e5e7eb;
+  border-radius: 8px; background: #fff; outline: none;
+}
+select:focus { border-color: #4f46e5; }
+.ghost {
+  margin-top: 4px; padding: 7px 0; font-size: 12.5px;
+  border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; cursor: pointer;
+}
+.ghost:hover { background: #f3f4f6; }
