@@ -619,7 +619,7 @@ function initParamsUI() {
   $('reasoning').value = ['low', 'medium', 'high'].includes(SETTINGS.genParams.reasoningEffort)
     ? SETTINGS.genParams.reasoningEffort
     : 'default';
-  $('panel-side').value = SETTINGS.panelSide === 'right' ? 'right' : 'left';
+  $('panel-side').value = SETTINGS.panelSide === 'left' ? 'left' : 'right';
   $('temp').addEventListener('input', () => ($('temp-val').textContent = $('temp').value));
   $('params-save').addEventListener('click', async () => {
     const temp = parseFloat($('temp').value);
@@ -636,7 +636,7 @@ function initParamsUI() {
       // 合并写而非整体替换：面板侧的免费/付费模式与目标字数（xPlan/targetLength）
       // 在此页无控件，整份覆盖会把它们清掉
       m.genParams = { ...m.genParams, ...params };
-      m.panelSide = $('panel-side').value === 'right' ? 'right' : 'left';
+      m.panelSide = $('panel-side').value === 'left' ? 'left' : 'right';
     });
     $('params-status').textContent = '✓ 已保存';
     toast('参数已保存');

@@ -55,7 +55,7 @@
         Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
     button { cursor: pointer; }
     .xcc-launcher {
-      position: fixed; left: 16px; top: 42%;
+      position: fixed; right: 16px; top: 42%;
       width: 44px; height: 44px; border-radius: 50%;
       border: none; color: #fff; font-size: 20px; line-height: 1;
       background: linear-gradient(135deg, #8b5cfa, #4f46e5);
@@ -63,7 +63,7 @@
       z-index: 2147483000; transition: transform .12s ease;
     }
     .xcc-launcher:hover { transform: scale(1.08); }
-    .xcc-launcher.right { left: auto; right: 16px; }
+    .xcc-launcher.left { right: auto; left: 16px; }
     .xcc-hover-btn {
       position: fixed; display: none;
       width: 26px; height: 26px; border-radius: 8px;
@@ -73,23 +73,23 @@
       box-shadow: 0 2px 8px rgba(0,0,0,.35);
       z-index: 2147483000;
     }
-    /* v0.5.0：全高侧边栏（SoPilot 式），默认停靠左侧，.right 切右侧 */
+    /* v0.5.0：全高侧边栏（SoPilot 式），默认停靠右侧，.left 切左侧（v0.5.1 翻转） */
     .xcc-panel {
-      position: fixed; top: 0; bottom: 0; left: 0;
+      position: fixed; top: 0; bottom: 0; right: 0;
       width: 380px; height: 100vh;
       background: rgba(21, 24, 31, .98); color: #e7e9ea;
-      border: 1px solid rgba(255,255,255,.12); border-left: none;
-      border-radius: 0 16px 16px 0;
+      border: 1px solid rgba(255,255,255,.12); border-right: none;
+      border-radius: 16px 0 0 16px;
       padding: 14px; z-index: 2147483000;
-      box-shadow: 8px 0 32px rgba(0, 0, 0, .5);
+      box-shadow: -8px 0 32px rgba(0, 0, 0, .5);
       display: flex; flex-direction: column; gap: 8px;
       overflow: hidden; /* 滚动下放给内部滚动区（推文框/输出框） */
     }
-    .xcc-panel.right {
-      left: auto; right: 0;
-      border-left: 1px solid rgba(255,255,255,.12); border-right: none;
-      border-radius: 16px 0 0 16px;
-      box-shadow: -8px 0 32px rgba(0, 0, 0, .5);
+    .xcc-panel.left {
+      right: auto; left: 0;
+      border-right: 1px solid rgba(255,255,255,.12); border-left: none;
+      border-radius: 0 16px 16px 0;
+      box-shadow: 8px 0 32px rgba(0, 0, 0, .5);
     }
     /* .xcc-panel 的 display:flex 会盖掉浏览器默认的 [hidden]{display:none}，必须显式声明 */
     .xcc-panel[hidden] { display: none; }
@@ -312,13 +312,13 @@
   function syncLauncher() {
     const enabled = !(state.settings && state.settings.enabled === false);
     els.launcher.style.display = enabled && els.panel.hidden ? '' : 'none';
-    els.launcher.classList.toggle('right', (state.settings && state.settings.panelSide) === 'right');
+    els.launcher.classList.toggle('left', (state.settings && state.settings.panelSide) === 'left');
   }
 
   function applySettings(pub) {
     state.settings = pub;
     if (pub.enabled === false) els.panel.hidden = true;
-    els.panel.classList.toggle('right', pub.panelSide === 'right');
+    els.panel.classList.toggle('left', pub.panelSide === 'left');
     fillSelect(els.personaSel, pub.personaPresets, pub.activePersonaId);
     fillSelect(els.genSel, pub.genPresets, pub.activeGenId);
     const ok = pub.ready && pub.ready[pub.provider];

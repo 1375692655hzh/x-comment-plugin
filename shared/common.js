@@ -99,8 +99,8 @@ const XCC_DEFAULTS = {
     targetLength: '' // 付费模式的目标字数（字符串，空 = 不加长度指令，仅模糊参考）
   },
 
-  // 面板停靠侧：'left' | 'right'（全高侧边栏形态，v0.5.0 起默认左侧）
-  panelSide: 'left'
+  // 面板停靠侧：'left' | 'right'（全高侧边栏形态，v0.5.1 起默认右侧）
+  panelSide: 'right'
 };
 
 // 把 chrome.storage.local 中保存的 settings 合并到默认值上（兼容旧版本缺字段）
@@ -173,6 +173,6 @@ function xccPublicSettings(s) {
       xPlan: s.genParams.xPlan === 'premium' ? 'premium' : 'free', // 脏值一律按 free
       targetLength: String(s.genParams.targetLength || '')
     },
-    panelSide: s.panelSide === 'right' ? 'right' : 'left'
+    panelSide: s.panelSide === 'left' ? 'left' : 'right' // 缺省/脏值一律按 right（v0.5.1 起新默认）
   };
 }

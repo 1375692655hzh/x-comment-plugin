@@ -226,17 +226,17 @@ const server = http.createServer((req, res) => {
         if (n !== 1) throw new Error('出现 ' + n + ' 份');
       });
 
-      // v0.5.0 全高侧边栏形态
-      await step('面板为全高侧边栏：高≈视口、宽 380、默认贴左缘', async () => {
+      // v0.5.0 全高侧边栏形态（v0.5.1 起默认右侧）
+      await step('面板为全高侧边栏：高≈视口、宽 380、默认贴右缘', async () => {
         const box = await page.evaluate(() => {
           const sr = document.querySelector('#xcc-host').shadowRoot;
           const p = sr.querySelector('.xcc-panel');
           const r = p.getBoundingClientRect();
-          return { ph: p.offsetHeight, pw: p.offsetWidth, x: r.x, ih: window.innerHeight };
+          return { ph: p.offsetHeight, pw: p.offsetWidth, right: window.innerWidth - r.right, ih: window.innerHeight };
         });
         if (Math.abs(box.ph - box.ih) > 2) throw new Error(`面板高 ${box.ph} ≠ 视口 ${box.ih}`);
         if (Math.abs(box.pw - 380) > 2) throw new Error('面板宽异常: ' + box.pw);
-        if (Math.abs(box.x) > 2) throw new Error('未贴左缘: x=' + box.x);
+        if (Math.abs(box.right) > 2) throw new Error('未贴右缘: 距右 ' + box.right);
         return box.pw + 'x' + box.ph;
       });
       await step('侧栏输出框显著加大（高度 > 300px）且推文框可伸缩', async () => {
@@ -661,12 +661,12 @@ const server = http.createServer((req, res) => {
       oauthState.grant = false;
     });
 
-    // v0.5.0 面板左右切换（storage.onChanged → applySettings → .right 类）
-    await step('面板位置切换：panelSide=right 贴右缘，恢复 left 贴左缘', async () => {
+    // v0.5.0 面板左右切换（storage.onChanged → applySettings → .left 类）；v0.5.1 默认右侧
+    await step('面板位置切换：panelSide=left 贴左缘，恢复 right 贴右缘', async () => {
       const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
       await optsPage.evaluate(async () => {
         const { settings } = await chrome.storage.local.get('settings');
-        settings.panelSide = 'right';
+        settings.panelSide = 'left';
         await chrome.storage.local.set({ settings });
       });
       await page.bringToFront();
@@ -676,18 +676,18 @@ const server = http.createServer((req, res) => {
         const b = p.getBoundingClientRect();
         return { x: b.x, right: window.innerWidth - b.right };
       });
-      if (Math.abs(r.right) > 2 || r.x < 100) throw new Error('未贴右缘: ' + JSON.stringify(r));
+      if (Math.abs(r.x) > 2 || r.right < 100) throw new Error('未贴左缘: ' + JSON.stringify(r));
       await optsPage.evaluate(async () => {
         const { settings } = await chrome.storage.local.get('settings');
-        settings.panelSide = 'left';
+        settings.panelSide = 'right';
         await chrome.storage.local.set({ settings });
       });
       await page.waitForTimeout(700);
       r = await page.evaluate(() => {
         const p = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-panel');
-        return { x: p.getBoundingClientRect().x };
+        return { right: window.innerWidth - p.getBoundingClientRect().right };
       });
-      if (Math.abs(r.x) > 2) throw new Error('未恢复左缘: x=' + r.x);
+      if (Math.abs(r.right) > 2) throw new Error('未恢复右缘: 距右 ' + r.right);
     });
 
     // 健康页免疫：切标签/事件触发绝不自愈（问题1 回归门禁）
