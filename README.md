@@ -68,6 +68,7 @@ x-comment-plugin/
 
 | 服务商 | Base URL | 模型示例 |
 |---|---|---|
+| 火山方舟（豆包） | `https://ark.cn-beijing.volces.com/api/v3` | `doubao-...` 系列 / `deepseek-...` |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
 | Kimi (Moonshot) | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
