@@ -572,9 +572,11 @@
       } else {
         const msg = String(r.error || '生成失败，请重试');
         setStatus(
-          /API 4\d\d|model|not\s*found|reasoning|模型/i.test(msg)
-            ? msg + '。该模型可能不在你账号的可用列表或参数不被支持：试试设置页下拉里标注（已验证）的模型；若刚改过思考强度请切回「默认」'
-            : msg,
+          msg.includes('生成长度上限')
+            ? msg // 思考耗尽的指引已自带准确动作，别再追加"换模型"画蛇添足
+            : /API 4\d\d|model|not\s*found|reasoning|模型/i.test(msg)
+              ? msg + '。该模型可能不在你账号的可用列表或参数不被支持：试试设置页下拉里标注（已验证）的模型；若刚改过思考强度请切回「默认」'
+              : msg,
           true
         );
       }

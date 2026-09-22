@@ -57,7 +57,9 @@ const t = (name, ok, extra) => {
 
 // ---------- 本地静态服务 + OAuth 模拟端点 ----------
 const oauthState = { grant: false };
-const mockLLM = { count: 0, lastBody: null, lastAuth: '', reply: null }; // 真实生成链路 mock：记录请求体供断言；reply 可注入自定义回复
+// 真实生成链路 mock：记录请求体供断言；reply 可注入自定义回复；
+// emptyLength='once' 模拟"推理模型思考耗尽"一次（finish_reason=length+空 content+reasoning_content），'always' 持续耗尽
+const mockLLM = { count: 0, lastBody: null, lastAuth: '', reply: null, emptyLength: null, emptyLengthHit: 0 };
 
 const server = http.createServer((req, res) => {
   const send = (code, body, type) => {
@@ -100,6 +102,21 @@ const server = http.createServer((req, res) => {
       }
       if (model === 'missing-model') {
         return send(404, { error: { message: 'model not found: missing-model' } });
+      }
+      if (mockLLM.emptyLength && (mockLLM.emptyLength === 'always' || mockLLM.emptyLengthHit < 1)) {
+        // 推理模型思考耗尽形态：思考占满 max_tokens，正文为空
+        mockLLM.emptyLengthHit++;
+        return send(200, {
+          id: 'chatcmpl-smoke-len',
+          model,
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: '', reasoning_content: '（模拟思考）我们要写一条不超过 280 字符的回复…' },
+              finish_reason: 'length'
+            }
+          ]
+        });
       }
       send(200, {
         id: 'chatcmpl-smoke',
@@ -705,6 +722,41 @@ const server = http.createServer((req, res) => {
       await page.locator('.xcc-panel [data-act="stance-objective"]').click();
       await page.waitForTimeout(500);
       return saved;
+    });
+
+    await step('思考耗尽自动重试：首次 length+空正文，提额后成功', async () => {
+      mockLLM.emptyLength = 'once';
+      mockLLM.emptyLengthHit = 0;
+      const before = mockLLM.count;
+      await page.bringToFront();
+      await page.locator('.xcc-out').fill(''); // 清旧值，防 waitForFunction 立即命中
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      await page.waitForFunction(() => {
+        const out = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-out');
+        return !!(out && out.value.includes('SMOKE-GEN'));
+      }, null, { timeout: 20000 });
+      if (mockLLM.count < before + 2) throw new Error('未自动重试: ' + (mockLLM.count - before) + ' 次请求');
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      if (!(body.max_tokens >= 3000)) throw new Error('重试未提额: max_tokens=' + body.max_tokens);
+      const st = await page.locator('.xcc-status').innerText();
+      if (!st.includes('已生成')) throw new Error('状态栏异常: ' + st.slice(0, 60));
+      mockLLM.emptyLength = null;
+      return '重试 max_tokens=' + body.max_tokens;
+    });
+
+    await step('持续思考耗尽：报错含准确指引（调大生成长度/换非推理模型）', async () => {
+      mockLLM.emptyLength = 'always';
+      mockLLM.emptyLengthHit = 0;
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      await page.waitForFunction(() => {
+        const st = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-status');
+        return !!(st && st.classList.contains('err') && st.textContent.includes('生成长度上限'));
+      }, null, { timeout: 20000 });
+      const st = await page.locator('.xcc-status').innerText();
+      if (!st.includes('调大') || !st.includes('非推理模型')) throw new Error('指引不全: ' + st.slice(0, 80));
+      if (st.includes('已验证')) throw new Error('误追加换模型提示: ' + st.slice(0, 80));
+      mockLLM.emptyLength = null;
+      return st.slice(0, 40);
     });
 
     await step('生成失败链路：4xx 原文透出并追加换模型提示', async () => {

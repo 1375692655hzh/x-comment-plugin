@@ -205,25 +205,9 @@ async function xccResolveProviderCfg(s) {
   throw new Error('未知的接入方式：' + s.provider);
 }
 
-async function xccChatCompletion(cfg, messages, genParams) {
-  const url = String(cfg.baseUrl || '').replace(/\/+$/, '') + '/chat/completions';
-  const body = {
-    model: cfg.model,
-    messages,
-    temperature: Number.isFinite(Number(genParams && genParams.temperature))
-      ? Number(genParams.temperature)
-      : 0.9,
-    max_tokens: Number.isFinite(Number(genParams && genParams.maxTokens))
-      ? Number(genParams.maxTokens)
-      : 400,
-    stream: false
-  };
-  // 思考强度：白名单后注入；'default'/脏值一律不发送，
-  // 保证对不认识该参数的端点（DeepSeek/Kimi/Ollama 等）零影响
-  const effort = genParams && genParams.reasoningEffort;
-  if (effort === 'low' || effort === 'medium' || effort === 'high') {
-    body.reasoning_effort = effort;
-  }
+// 单次补全请求。返回 { text, finish, drained }：
+// drained=true 表示"思考耗尽"形态（finish_reason=length、正文空、reasoning_content 非空）
+async function xccChatOnce(cfg, url, body) {
   let res;
   try {
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.apiKey };
@@ -244,12 +228,48 @@ async function xccChatCompletion(cfg, messages, genParams) {
     throw new Error('API ' + res.status + '：' + t.slice(0, 300));
   }
   const data = await res.json().catch(() => null);
-  const text =
-    data && data.choices && data.choices[0] && data.choices[0].message
-      ? data.choices[0].message.content
-      : null;
-  if (!text) throw new Error('模型未返回内容：' + JSON.stringify(data).slice(0, 200));
-  return xccCleanReplyText(String(text));
+  const msg = data && data.choices && data.choices[0] ? data.choices[0].message : null;
+  const finish = data && data.choices && data.choices[0] ? data.choices[0].finish_reason : '';
+  const text = msg ? msg.content : null;
+  const reasoning = msg ? msg.reasoning_content || msg.reasoning : '';
+  if (text && String(text).trim()) return { text: String(text), finish, drained: false };
+  if (finish === 'length' && reasoning && String(reasoning).trim()) {
+    // 推理模型把 max_tokens 全用在思考上，正文一个字没生成就被截断
+    return { text: '', finish, drained: true, raw: data };
+  }
+  throw new Error('模型未返回内容：' + JSON.stringify(data).slice(0, 200));
+}
+
+async function xccChatCompletion(cfg, messages, genParams) {
+  const url = String(cfg.baseUrl || '').replace(/\/+$/, '') + '/chat/completions';
+  const body = {
+    model: cfg.model,
+    messages,
+    temperature: Number.isFinite(Number(genParams && genParams.temperature))
+      ? Number(genParams.temperature)
+      : 0.9,
+    max_tokens: Number.isFinite(Number(genParams && genParams.maxTokens))
+      ? Number(genParams && genParams.maxTokens)
+      : 400,
+    stream: false
+  };
+  // 思考强度：白名单后注入；'default'/脏值一律不发送，
+  // 保证对不认识该参数的端点（DeepSeek/Kimi/Ollama 等）零影响
+  const effort = genParams && genParams.reasoningEffort;
+  if (effort === 'low' || effort === 'medium' || effort === 'high') {
+    body.reasoning_effort = effort;
+  }
+  const first = await xccChatOnce(cfg, url, body);
+  if (!first.drained) return xccCleanReplyText(first.text);
+  // 思考耗尽：自动提高上限重试一次（3000 对免费模式 280 字符的回复绰绰有余）
+  const retryBody = { ...body, max_tokens: Math.max(body.max_tokens * 3, 3000) };
+  const second = await xccChatOnce(cfg, url, retryBody);
+  if (!second.drained) return xccCleanReplyText(second.text);
+  throw new Error(
+    '模型思考用完了生成长度上限（max_tokens=' + body.max_tokens + ' 被推理消耗殆尽，正文为空；' +
+      '已自动提高到 ' + retryBody.max_tokens + ' 重试仍失败）。请到设置页把「最大生成长度」调大' +
+      '（推荐 3000+），或改选非推理模型，或把思考强度调低/设为默认'
+  );
 }
 
 // ---------- 输出清洗：剥 AI 格式残留（保守原则：宁可少剥，不误杀正文） ----------

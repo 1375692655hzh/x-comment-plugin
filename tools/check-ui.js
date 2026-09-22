@@ -102,6 +102,7 @@ check(oj.includes('function renderCustomModels'), '设置页有 renderCustomMode
 check(oj.includes('至少保留一个模型'), '模型列表删除有「至少保留一个」兜底');
 check(content.includes('function frameworkInsert'), '填入走框架优先插入（beforeinput 认领探测）');
 check(content.includes('span[data-text="true"]'), '光标落位到框架文本叶子（死键根因修复）');
+check(read('shared/api.js').includes('思考用完了生成长度上限'), 'api.js 有思考耗尽检测与提额重试');
 
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));
