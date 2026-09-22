@@ -241,9 +241,18 @@ async function saveProvider(kind) {
         const hasPerm = await new Promise((res) =>
           chrome.permissions.contains({ origins: [origin + '/*'] }, (g) => res(!!g))
         );
-        msg += hasPerm
-          ? `（${origin} 权限已授予——是网络不通：请在地址栏直接打开该地址验证能否访问）`
-          : `（${origin} 权限未授予——请再点一次「保存并测试」，弹窗中点「允许」）`;
+        if (hasPerm) {
+          msg +=
+            `（${origin} 权限已授予——是网络不通：请在地址栏直接打开该地址验证能否访问；` +
+            '若是指纹浏览器/海外代理环境，把该站域名加入代理黑名单分流——见下方「连不通？」说明）';
+          // 命中网络不通时自动展开分流说明，解法直接到眼前
+          if (kind === 'custom') {
+            const help = $('custom-proxy-help');
+            if (help) help.open = true;
+          }
+        } else {
+          msg += `（${origin} 权限未授予——请再点一次「保存并测试」，弹窗中点「允许」）`;
+        }
       }
     }
     statusEl.textContent = '✗ ' + msg;

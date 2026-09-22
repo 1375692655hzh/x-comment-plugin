@@ -118,6 +118,11 @@ check(content.includes('hum-toggle') && content.includes('function renderHumaniz
 check(content.includes('已去AI味'), '状态栏标注去AI味结果');
 check(read('tools/smoke/smoke.js').includes('SMOKE-HUMANIZED'), '冒烟覆盖去AI味二段链路');
 
+// 5.9 v0.5.10 门禁：指纹浏览器/海外代理分流说明（同事场景实测解法固化进设置页）
+check(oh.includes('id="custom-proxy-help"'), '设置页存在分流说明折叠块 #custom-proxy-help');
+check(oh.includes('代理IP黑名单') && oh.includes('*模型域名'), '分流说明含比特浏览器具体操作路径');
+check(oj.includes("help.open = true"), '诊断命中网络不通时自动展开分流说明');
+
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));
 const refs = [

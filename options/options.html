@@ -67,6 +67,21 @@
       <p class="hint">常用：OpenAI https://api.openai.com/v1 · DeepSeek https://api.deepseek.com/v1 ·
         Kimi https://api.moonshot.cn/v1 · OpenRouter https://openrouter.ai/api/v1 ·
         Ollama 本地 http://localhost:11434/v1</p>
+      <details id="custom-proxy-help">
+        <summary class="hint">连不通？（指纹浏览器 / 海外代理环境必读，比特浏览器实测有效）</summary>
+        <p class="hint"><b>症状</b>：点「保存并测试」报 ✗ 网络请求失败（Failed to fetch），括号诊断显示
+          「权限已授予——是网络不通」。</p>
+        <p class="hint"><b>原因</b>：插件的请求走浏览器网络（跟随浏览器代理）。指纹浏览器 / VPN 常配海外代理，
+          海外出口访问国内模型端点经常不通——不是 Key 或插件的问题。</p>
+        <p class="hint"><b>解法（分流：模型域名直连，其余照走代理）</b>：把模型站域名加入指纹浏览器的
+          代理黑名单（=「不代理的地址」）。比特浏览器：系统设置 → 全局设置 → <b>代理IP黑名单</b> →
+          输入 <code>*模型域名</code>（如 <code>*xiaomimimo.com</code>，星号匹配全部子域名）→ 添加 → 保存 →
+          <b>关掉已打开的窗口重开</b>（代理参数在窗口启动时注入）。其他指纹浏览器找同类的
+          「不代理的地址 / bypass list」设置，效果相同。</p>
+        <p class="hint"><b>验证</b>：在浏览器窗口的地址栏直接打开接口地址能访问 → 回这里再点「保存并测试」。</p>
+        <p class="hint"><b>说明</b>：黑名单只让模型域名直连本地网络，x.com 等其余流量照走代理，
+          指纹与出口 IP 完全不受影响。</p>
+      </details>
     </div>
 
     <div class="provider-pane" id="pane-oauth" hidden>
