@@ -104,7 +104,12 @@ function buildHumanizeMessages(s, text) {
     '- 说人话：不用"深入、格局、赋能、无疑、彰显、令人"这类 AI 高频词，换最平实的说法\n' +
     '- 像打字不像写作：可以有口语、省略、轻微的语气和情绪，别堆 emoji，不用 markdown\n' +
     '- 具体优先：抽象概括换成具体细节；没有可换的就保持原样，绝不编造新事实\n' +
-    '- 原评论开头的固定前缀（如「省流：」）必须原样保留——那是风格标记，不是正文';
+    '- 原评论开头的固定前缀（如「省流：」）必须原样保留——那是风格标记，不是正文\n' +
+    // v0.5.15 三不改（实测样本教训：改写层加戏/私改事实/改出病句是最大漏洞源）
+    '- 硬约束：你只改措辞，不改内容——句子数量不得增减；每句话的事实和观点必须与原文一致，' +
+    '不许新增原文没有的事实、定性或"内幕感"解读（原文没说"缺货"就不能写缺货，没说"赌"就不能写赌）\n' +
+    '- 每个分句改完必须通顺完整，改不顺就保留原句——宁可少改，不可改出病句\n' +
+    '- 结尾保持原文的收尾方式，不许追加新的总结句、金句或"第二拍"态度';
   if (s.genParams.language === 'zh') sys += '\n\n保持中文。';
   else if (s.genParams.language === 'en') sys += '\n\nKeep it in English.';
   else sys += '\n\n保持原评论的语言不变。';
@@ -131,11 +136,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         let text = await xccChatCompletion(cfg, buildMessages(s, msg), s.genParams);
         let humanized = false;
         let humanizeError = '';
-        // 去AI味：第二段"人味改写"。失败不连坐第一段成果——回退原稿继续可用
+        // 去AI味：第二段"人味改写"。失败不连坐第一段成果——回退原稿继续可用。
+        // v0.5.15 句数回查：改写加戏（句末标点变多=新增了句子）→ 回退初稿，
+        // 给提示词层装一道代码级刹车（改写层"只改措辞"约束的确定性兜底）
         if (s.genParams.humanize === 'on' && text) {
           try {
-            text = await xccChatCompletion(cfg, buildHumanizeMessages(s, text), s.genParams);
-            humanized = true;
+            const rewritten = await xccChatCompletion(cfg, buildHumanizeMessages(s, text), s.genParams);
+            const countSent = (t) => (String(t).match(/[。！？!?…]/g) || []).length;
+            if (countSent(rewritten) > countSent(text)) {
+              humanizeError = '改写疑似加戏（句子数变多），已回退初稿';
+            } else {
+              text = rewritten;
+              humanized = true;
+            }
           } catch (e) {
             humanizeError = e && e.message ? e.message : String(e);
           }

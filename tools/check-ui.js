@@ -158,6 +158,14 @@ check(common.includes('别复述原句'), '认同条防复述原话（评审共�
 check(common.includes('不替作者编动机'), '省流条收敛攻击性（不编动机/不硬挑刺）');
 check(common.includes('收尾给出你的判断'), '深度分析收尾给判断（与犀利提问区分）');
 check(sw.includes('省流：」）必须原样保留'), '人味改写保留风格锚点前缀（防洗掉"省流："）');
+
+// 5.13 v0.5.15 门禁：改写层三不改 + 句数回查 + 态度多样化（A/B 盲评修订版）
+check(sw.includes('只改措辞') && sw.includes('句子数量不得增减'), '人味改写三不改（只改措辞/句数不增/事实零增改）');
+check(sw.includes('改写疑似加戏') || sw.includes('countSent'), 'GENERATE 有句数回查（改写加戏回退初稿）');
+check(sw.includes('不可改出病句'), '改写层防病句条款');
+check(common.includes('谁买单'), '省流条态度多样化（治"最后谁买单"式同质化）');
+check(common.includes('不替当事方编动机'), '深析条补编动机禁令');
+check(common.includes('presetsV4'), '存在 presetsV4 迁移标记');
 }
 
 // 6. manifest 引用的文件都存在

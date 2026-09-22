@@ -96,14 +96,16 @@ const XCC_DEFAULTS = {
     {
       id: 'g-tldr',
       name: '省流党',
+      // v0.5.15：保持 v0.5.14 骨架（A/B 盲评否决了"信源词保留+禁推断戏+中性收尾"的重写版——
+      // 防翻车做成了防出彩），仅追加态度句多样性（治"最后谁买单"式同质化，两轮实测实锤）
       prompt:
-        '以"省流："开头，一句话把这条推文压成更准的说法：它真正的结论，或它没说出口的前提。要求：一针见血、大白话，不替作者编动机；有标题党或贩卖焦虑的嫌疑就客观点破，没有就老实总结不硬挑刺；原帖本身很短就直接提炼重点，不复读。最后跟一句你的态度短评，只一句。全文不超过 120 字符。\n\n推文内容：\n{tweet_text}'
+        '以"省流："开头，一句话把这条推文压成更准的说法：它真正的结论，或它没说出口的前提。要求：一针见血、大白话，不替作者编动机；有标题党或贩卖焦虑的嫌疑就客观点破，没有就老实总结不硬挑刺；原帖本身很短就直接提炼重点，不复读。最后跟一句你的态度短评，只一句，换个花样（点破前提、质疑数据、点利害方都行），别每次都"最后谁买单"式收口。全文不超过 120 字符，口语化。\n\n推文内容：\n{tweet_text}'
     },
     {
       id: 'g-deep',
       name: '深度分析',
       prompt:
-        '回复这条推文，只抓一个别人容易漏掉的点：关键变量、逻辑断点或适用条件，讲清它怎么改变结论，收尾给出你的判断（不必提问）。要求：评论体，两三句写完，不写成小作文、不用学术腔；依据只写推文里有的或不用查也成立的常识，拿不准就删掉依据改说推测，不编数字案例和经历。不超过 280 字符。\n\n推文内容：\n{tweet_text}'
+        '回复这条推文，只抓一个别人容易漏掉的点：关键变量、逻辑断点或适用条件，讲清它怎么改变结论，收尾给出你的判断（不必提问）。要求：评论体，两三句写完，不写成小作文、不用学术腔；依据只写推文里有的或不用查也成立的常识，拿不准就删掉依据改说推测，不替当事方编动机，不编数字案例和经历。不超过 280 字符。\n\n推文内容：\n{tweet_text}'
     }
   ],
 
@@ -138,7 +140,10 @@ const XCC_DEFAULTS = {
   presetsV2: true,
   // 风格文案版本标记（v0.5.14）：旧数据没有此标记 → 内置五件套 prompt 按新文案升级
   // （用户自定义预设 id 不在内置集合内的原样保留，人设预设不动）
-  presetsV3: true
+  presetsV3: true,
+  // v0.5.15：改写层三不改 + 句数回查 + 深析补编动机禁令 + 省流态度多样化
+  // （A/B 盲评驱动：防御性改动保留，省流条重写版被否决回滚，仅留同质化修复）
+  presetsV4: true
 };
 
 // 把 chrome.storage.local 中保存的 settings 合并到默认值上（兼容旧版本缺字段）
@@ -220,6 +225,12 @@ function xccMergeSettings(saved) {
     const builtinIds = new Set(XCC_DEFAULTS.genPresets.map((g) => g.id));
     const extras = genPresets.filter((g) => g && g.id && !builtinIds.has(g.id));
     genPresets = [...XCC_DEFAULTS.genPresets, ...extras];
+  } else if (!s.presetsV4) {
+    // v0.5.15：省流党/深度分析两条再升级（同款按 id 替换，自定义预设保留）
+    const v4Ids = new Set(['g-tldr', 'g-deep']);
+    const extras = genPresets.filter((g) => g && g.id && !v4Ids.has(g.id));
+    const fresh = XCC_DEFAULTS.genPresets.filter((g) => v4Ids.has(g.id));
+    genPresets = [...extras, ...fresh]; // 顺序变化无碍：UI 按 name 展示，active 走 id
   }
   // active 指向已删除的预设时收敛到首个（防下拉空选中/GENERATE 走错预设）
   if (!personaPresets.some((p) => p.id === activePersonaId)) {
@@ -240,7 +251,8 @@ function xccMergeSettings(saved) {
     activePersonaId,
     activeGenId,
     presetsV2: true,
-    presetsV3: true
+    presetsV3: true,
+    presetsV4: true
   };
 }
 

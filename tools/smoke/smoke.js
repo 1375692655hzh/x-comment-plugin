@@ -772,6 +772,7 @@ const server = http.createServer((req, res) => {
       if (!sys.includes('人味改写器')) throw new Error('二段请求 system 非人味改写: ' + sys.slice(0, 40));
       if (!sys.includes('280')) throw new Error('免费模式改写段未带 280 硬约束');
       if (!sys.includes('省流')) throw new Error('改写段未保留「省流：」风格锚点');
+      if (!sys.includes('只改措辞')) throw new Error('改写段缺三不改硬约束');
       if (!usr.includes('SMOKE-GEN 固定回复')) throw new Error('二段请求未携带第一段结果: ' + usr.slice(0, 40));
       const out = await page.locator('.xcc-out').inputValue();
       if (!out.includes('SMOKE-HUMANIZED')) throw new Error('输出框非改写结果: ' + out.slice(0, 40));
@@ -1284,7 +1285,31 @@ const server = http.createServer((req, res) => {
       if (!r3.upgraded) throw new Error('内置五件未升级到 v0.5.14 文案');
       if (!r3.mine.includes('我的独有指令')) throw new Error('用户自定义预设被误删: ' + r3.mine);
       if (r3.v3 !== true) throw new Error('presetsV3 标记未置位');
-      return r.n + ' / ' + r.gp + ' / v3=' + r3.n;
+      // v0.5.15 presetsV4：v0.5.14 形态数据 → 省流态度多样化/深析编动机禁令落地，自定义保留
+      const r4 = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const old = JSON.parse(JSON.stringify(settings));
+        delete old.presetsV4; // 模拟 v0.5.14 存量数据
+        old.genPresets = [
+          ...old.genPresets,
+          { id: 'g-mine4', name: '我的风格4', prompt: '独有指令4 {tweet_text}' }
+        ];
+        const m = xccMergeSettings(old);
+        const tldr = m.genPresets.find((g) => g.id === 'g-tldr');
+        const deep = m.genPresets.find((g) => g.id === 'g-deep');
+        const mine = m.genPresets.find((g) => g.id === 'g-mine4');
+        return {
+          div: !!(tldr && tldr.prompt.includes('谁买单')),
+          deep: !!(deep && deep.prompt.includes('不替当事方编动机')),
+          mine: !!mine,
+          v4: m.presetsV4
+        };
+      });
+      if (!r4.div) throw new Error('省流条未升级到 v0.5.15（缺态度多样化）');
+      if (!r4.deep) throw new Error('深析条未升级到 v0.5.15（缺编动机禁令）');
+      if (!r4.mine) throw new Error('presetsV4 误删自定义预设');
+      if (r4.v4 !== true) throw new Error('presetsV4 标记未置位');
+      return r.n + ' / ' + r.gp + ' / v3=' + r3.n + ' / v4=ok';
     });
 
     // v0.5.0 面板左右切换（storage.onChanged → applySettings → .left 类）；v0.5.1 默认右侧
