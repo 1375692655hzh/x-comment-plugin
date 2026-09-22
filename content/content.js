@@ -782,7 +782,28 @@
       return 'recovered';
     }
 
-    // 仍异常：合成 paste 兜底（走框架粘贴管线，插入必然落在框架状态内）
+    // 仍异常：DOM 直插进叶子 + 派发 input（部分框架构建不认领合成 beforeinput，
+    // 但会从 DOM 重读内容重建 state——Draft 的 Android 兼容路径 editOnInput 同型）
+    clearEditor(editor);
+    placeCaretInLeaf(editor);
+    try {
+      const leaf =
+        editor.querySelector('span[data-text="true"]') ||
+        editor.querySelector('[data-lexical-text="true"]') ||
+        editor;
+      leaf.appendChild(document.createTextNode(text));
+      editor.dispatchEvent(
+        new InputEvent('input', { inputType: 'insertText', data: text, bubbles: true })
+      );
+    } catch (e) {
+      /* 忽略，走 paste 兜底 */
+    }
+    await sleep(300);
+    if (countOccurrences(normEditorText(editor.innerText), want) === 1 && sendReady(editor)) {
+      return 'recovered';
+    }
+
+    // 最后兜底：合成 paste（走框架粘贴管线，插入必然落在框架状态内）
     clearEditor(editor);
     pasteInsert(editor, text);
     await sleep(400);
@@ -819,6 +840,23 @@
     return null;
   }
 
+  // 弹层/详情页内的编辑器是否正对目标推文——防止把回复填进"别的推文"的框
+  function editorMatchesTarget(editor, href) {
+    const clean = String(href || '').split('?')[0];
+    if (!clean || !editor || !editor.closest) return false;
+    const inDialog = !!editor.closest('[role="dialog"]');
+    // 详情页常驻回复框：URL 即目标推文永久链接（dialog 内的走下面的弹层校验，
+    // 防止把详情页上打开的转发框误当回复框）
+    if (isDetailPage() && !inDialog && location.pathname.split('?')[0] === clean) return true;
+    // 弹层：dialog 内渲染的原推文 permalink 与目标一致
+    if (!inDialog) return false;
+    const dlg = editor.closest('[role="dialog"]');
+    for (const a of dlg.querySelectorAll('article[data-testid="tweet"]')) {
+      if (articlePermalink(a) === clean) return true;
+    }
+    return false;
+  }
+
   async function insertResult() {
     if (state.inserting) return;
     const text = els.out.value.trim();
@@ -832,41 +870,55 @@
       // 结果绑定生成时的推文；纯手写内容（从未生成过）才用当前捕获
       const target = state.generatedFor || state.captured;
       if (target && target.href) {
-        // 已有可见编辑器包含同样内容（此前已填过/弹层还开着）：直接视为成功，
-        // 不再点回复按钮——避免二次开框与双份内容
-        const dup = visibleEditors().find(
+        const existing = visibleEditors();
+        // 已有可见编辑器包含同样内容（此前已填过/弹层还开着）：直接视为成功
+        const dup = existing.find(
           (e) => countOccurrences(normEditorText(e.innerText), normEditorText(text)) > 0
         );
         if (dup) {
           setStatus('回复框已包含该内容，未重复填入');
           return;
         }
-        // 回复模式：找到原推文 → 点回复按钮 → 等编辑器出现 → 写入
-        const art = findArticleByHref(target.href);
-        if (!art) {
-          setStatus('页面上找不到原推文（可能已滚出屏幕），请滚回该推文附近再试', true);
-          return;
-        }
-        const replyBtn = art.querySelector('[data-testid="reply"]');
-        if (!replyBtn) {
-          setStatus('找不到该推文的回复按钮', true);
-          return;
-        }
-        const before = new Set(visibleEditors());
-        replyBtn.click();
-        const editor = await waitForNewEditor(before, 6000);
+        // v0.5.5：已有打开且正对目标推文的回复框 → 直接填入，不再点回复按钮开新框。
+        // 旧逻辑总是再点一次 reply，在弹层/详情页并存时会把内容填进用户看不见的
+        // 背景框（用户面前的弹层是空的）。只认弹层内编辑器与详情页常驻框——
+        // 首页发帖框不算回复框，且必须匹配目标推文，防止回错帖
+        let editor = existing.find((e) => editorMatchesTarget(e, target.href)) || null;
         if (!editor) {
-          setStatus('回复框未能打开，内容已复制，请手动粘贴', true);
-          copyText(text);
-          return;
+          // 回复模式：找到原推文 → 点回复按钮 → 等编辑器出现 → 写入
+          const art = findArticleByHref(target.href);
+          if (!art) {
+            setStatus('页面上找不到原推文（可能已滚出屏幕），请滚回该推文附近再试', true);
+            return;
+          }
+          const replyBtn = art.querySelector('[data-testid="reply"]');
+          if (!replyBtn) {
+            setStatus('找不到该推文的回复按钮', true);
+            return;
+          }
+          const before = new Set(visibleEditors());
+          replyBtn.click();
+          editor = await waitForNewEditor(before, 6000);
+          if (!editor) {
+            setStatus('回复框未能打开，内容已复制，请手动粘贴', true);
+            copyText(text);
+            return;
+          }
+          // 回退路径拿到的编辑器可能不是目标推文的（背景框）：有匹配项则纠正
+          if (!editorMatchesTarget(editor, target.href)) {
+            const m = visibleEditors().find((e) => editorMatchesTarget(e, target.href));
+            if (m) editor = m;
+          }
         }
         const r = await insertInto(editor, text);
+        const where =
+          editor && editor.closest && editor.closest('[role="dialog"]') ? '弹出的回复框' : '回复框';
         if (r === 'ok' || r === 'recovered') {
           setStatus(
             (r === 'recovered' ? '已自动纠正一次异常插入，请检查。' : '') +
               (target !== state.captured
-                ? '✓ 已按生成时的推文（' + (target.author || '') + '）填入，检查后手动发送'
-                : '✓ 已填入回复框，检查后手动点发送')
+                ? '✓ 已按生成时的推文（' + (target.author || '') + '）填入' + where + '，检查后手动发送'
+                : '✓ 已填入' + where + '，检查后手动点发送')
           );
         } else if (r === 'skip') {
           setStatus('回复框已包含该内容，未重复填入');

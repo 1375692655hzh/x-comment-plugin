@@ -264,6 +264,35 @@ const server = http.createServer((req, res) => {
       });
 
       // 框架编辑器：填入必须走框架路径（state 与 DOM 一致、可继续编辑）
+      // v0.5.5：弹层回复框已打开且正对目标推文 → 直接填入，不点 reply 开新框
+      await step('弹层回复框已开时直接填入（不点 reply，背景发帖框不误写）', async () => {
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'block';
+          document.getElementById('composer').textContent = '';
+          window.__fw.reset();
+        });
+        await page.locator('.xcc-out').fill('弹层直填 dlg-direct');
+        await page.locator('.xcc-panel [data-act="insert"]').click();
+        // 等真实结果落进 mock state（等状态栏文案会被上一断言遗留的"已填入弹出的
+        // 回复框"假命中——v0.5.5 起 reply 流程开的框也叫弹出的回复框）
+        await page.waitForFunction(() => window.__fw.text() === '弹层直填 dlg-direct', null, {
+          timeout: 8000
+        });
+        // 围栏：insertResult 的 finally 才解禁按钮 = 本次插入彻底收尾（含恢复链尾部 sleep）
+        await page.waitForFunction(() => {
+          const b = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-row [data-act="insert"]');
+          return !!(b && !b.disabled);
+        }, null, { timeout: 8000 });
+        const stTxt = await page.locator('.xcc-status').innerText();
+        if (!stTxt.includes('弹出')) throw new Error('状态栏未标明弹层: ' + stTxt);
+        const composer = await page.locator('#composer').innerText();
+        if (composer.includes('dlg-direct')) throw new Error('误写背景发帖框');
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'none';
+        });
+        return 'ok';
+      });
+
       await step('框架编辑器：填入走框架路径（state 与 DOM 一致，不退化不纠正）', async () => {
         await page.evaluate(() => {
           document.getElementById('modal').style.display = 'none';
@@ -271,13 +300,12 @@ const server = http.createServer((req, res) => {
         });
         await page.locator('.xcc-out').fill('框架路径回复 fw-insert');
         await page.locator('.xcc-panel [data-act="insert"]').click();
-        // 等 applied 或 paste 到来（不赌固定耗时：恢复链串行可达 1.6s+）
-        await page.waitForFunction(
-          () => window.__fw.stats.applied > 0 || window.__fw.stats.paste > 0,
-          null,
-          { timeout: 8000 }
-        );
-        await page.waitForTimeout(600); // 等状态栏文案稳定
+        // 围栏：等 insertResult 彻底收尾（applied>0 命中太早——insertInto 恢复链的
+        // 尾部校验/清场还在跑，期间读 state 会拿到中间态）
+        await page.waitForFunction(() => {
+          const b = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-row [data-act="insert"]');
+          return !!(b && !b.disabled);
+        }, null, { timeout: 8000 });
         const st = await page.evaluate(() => ({
           text: window.__fw.text(),
           stats: window.__fw.stats,

@@ -49,12 +49,20 @@
 
 <div id="modal" role="dialog">
   <div class="card">
+    <!-- 弹层内渲染的原推文（隐藏副本）：模拟真实 X 回复弹层包含目标推文，供填入目标校验 -->
+    <article data-testid="tweet" style="display:none">
+      <a href="/alpha/status/1001"><time>2h</time></a>
+    </article>
     <div id="modal-editor" data-testid="tweetTextarea_0" contenteditable="true" role="textbox"></div>
     <button data-testid="tweetButton" disabled style="margin-top:10px">回复</button>
   </div>
 </div>
 
 <script>
+  // 测试页插桩通道：content.js 的填入路径打点经此转发，断言失败时 dump
+  window.__insLogs = [];
+  window.__insLog = function (s) { window.__insLogs.push(String(s)); };
+
   // 模拟 X：点「回复」弹出带编辑器的对话框
   document.querySelectorAll('[data-testid="reply"]').forEach(function (btn) {
     btn.addEventListener('click', function () {

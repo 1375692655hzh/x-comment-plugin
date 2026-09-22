@@ -103,6 +103,9 @@ check(oj.includes('至少保留一个模型'), '模型列表删除有「至少�
 check(content.includes('function frameworkInsert'), '填入走框架优先插入（beforeinput 认领探测）');
 check(content.includes('span[data-text="true"]'), '光标落位到框架文本叶子（死键根因修复）');
 check(read('shared/api.js').includes('思考用完了生成长度上限'), 'api.js 有思考耗尽检测与提额重试');
+check(content.includes('editorMatchesTarget'), '填入前校验编辑器匹配目标推文（防填错框/回错帖）');
+check(content.includes('弹出的回复框'), '状态栏标明填入位置（弹层/页面框）');
+check(content.includes("new InputEvent('input'"), 'insertInto 有 DOM 直插+input 派发兜底路径');
 
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));
