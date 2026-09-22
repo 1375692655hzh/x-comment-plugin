@@ -151,8 +151,13 @@
       background: linear-gradient(135deg, #8b5cfa, #4f46e5);
     }
     .xcc-gen-btn:disabled { opacity: .55; cursor: not-allowed; }
-    .xcc-out-bar { display: flex; justify-content: flex-end; align-items: center; flex: 0 0 auto;
+    .xcc-out-bar { display: flex; justify-content: space-between; align-items: center; flex: 0 0 auto;
       min-height: 14px; margin-bottom: -2px; }
+    /* 去AI味开关（v0.5.9）：常驻输出框上方左侧；开启后每次生成多走一遍"人味改写" */
+    button.xcc-hum { background: none; border: none; padding: 0; cursor: pointer;
+      font-size: 11px; color: #9ca3af; line-height: 1.2; }
+    button.xcc-hum:hover { color: #e7e9ea; }
+    button.xcc-hum.on { color: #a5b4fc; font-weight: 600; }
     .xcc-count { font-size: 11px; color: #9ca3af; line-height: 1.2; }
     .xcc-count.over { color: #f87171; font-weight: 600; }
     /* 生成输出框：v0.5.0 侧栏形态的主区，弹性伸展且占比最大（约为推文框 2.4 倍） */
@@ -219,7 +224,11 @@
     </div>
     <input class="xcc-topic" placeholder="或输入主题（生成原创推文用）">
     <button class="xcc-gen-btn">✦ 生成</button>
-    <div class="xcc-out-bar"><span class="xcc-count">0/280</span></div>
+    <div class="xcc-out-bar">
+      <button class="xcc-hum" data-act="hum-toggle"
+        title="去AI味：开启后每次生成会先出初稿、再自动走一遍「人味改写」（更像真人随手发的，AI 味更少）。代价：耗时与额度翻倍">去AI味：关</button>
+      <span class="xcc-count">0/280</span>
+    </div>
     <textarea class="xcc-out" placeholder="生成结果（可手动修改后再填入）"></textarea>
     <div class="xcc-row">
       <button class="xcc-main" data-act="insert">填入回复框</button>
@@ -248,6 +257,7 @@
     genBtn: shadow.querySelector('.xcc-gen-btn'),
     insertBtn: shadow.querySelector('.xcc-row [data-act="insert"]'),
     out: shadow.querySelector('.xcc-out'),
+    hum: shadow.querySelector('.xcc-hum'),
     count: shadow.querySelector('.xcc-count'),
     status: shadow.querySelector('.xcc-status')
   };
@@ -319,6 +329,14 @@
     updateCount();
   }
 
+  // 去AI味开关渲染（v0.5.9）：输出框上方的小开关，开=生成后走二段"人味改写"
+  function renderHumanize() {
+    if (!els.hum) return;
+    const on = !!(state.settings && state.settings.genParams && state.settings.genParams.humanize === 'on');
+    els.hum.textContent = '去AI味：' + (on ? '开' : '关');
+    els.hum.classList.toggle('on', on);
+  }
+
   // 输出框字符计数：免费 n/280（超限标红仅提示不截断）；付费 n 字
   function updateCount() {
     if (!els.count) return;
@@ -380,6 +398,7 @@
     }
     renderStance();
     renderPlan();
+    renderHumanize();
     syncGenBtn();
     syncLauncher();
   }
@@ -565,7 +584,13 @@
       if (r && r.ok) {
         els.out.value = r.text;
         state.generatedFor = target;
-        setStatus('已生成，可编辑后填入');
+        setStatus(
+          r.humanized
+            ? '已生成（已去AI味），可编辑后填入'
+            : r.humanizeError
+              ? '已生成，可编辑后填入（去AI味未成功，已用原稿）'
+              : '已生成，可编辑后填入'
+        );
         updateCount();
       } else if (!r) {
         setStatus('生成失败：扩展后台无响应，请到扩展管理页「重新加载」扩展后刷新本页重试', true);
@@ -1012,6 +1037,14 @@
       renderStance();
       mutateSettings((m) => {
         m.stance = v;
+      }).catch(() => {});
+    } else if (act === 'hum-toggle') {
+      // 去AI味开关：本地即时翻转（不等 storage 往返），落盘后 onChanged 会再同步
+      const v = state.settings && state.settings.genParams && state.settings.genParams.humanize === 'on' ? 'off' : 'on';
+      if (state.settings && state.settings.genParams) state.settings.genParams.humanize = v;
+      renderHumanize();
+      mutateSettings((m) => {
+        m.genParams.humanize = v;
       }).catch(() => {});
     }
   });

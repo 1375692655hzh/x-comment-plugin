@@ -124,7 +124,10 @@ const XCC_DEFAULTS = {
     reasoningEffort: 'default',
     // 账号模式：'free' = X 免费用户（280 字符上限，生成时注入硬约束）| 'premium' = 付费不限长
     xPlan: 'free',
-    targetLength: '' // 付费模式的目标字数（字符串，空 = 不加长度指令，仅模糊参考）
+    targetLength: '', // 付费模式的目标字数（字符串，空 = 不加长度指令，仅模糊参考）
+    // 去AI味（v0.5.9）：'on' = 生成后再走一遍"人味改写"二段调用（参考 blader/humanizer
+    // 与 Humanizer-zh 的 AI 痕迹清单）。代价 = 每次生成两次请求；脏值一律按 off
+    humanize: 'off'
   },
 
   // 面板停靠侧：'left' | 'right'（全高侧边栏形态，v0.5.1 起默认右侧）
@@ -233,7 +236,8 @@ function xccPublicSettings(s) {
     stance: ['optimistic', 'pessimistic'].includes(s.stance) ? s.stance : 'objective', // 脏值一律按客观
     genParams: {
       xPlan: s.genParams.xPlan === 'premium' ? 'premium' : 'free', // 脏值一律按 free
-      targetLength: String(s.genParams.targetLength || '')
+      targetLength: String(s.genParams.targetLength || ''),
+      humanize: s.genParams.humanize === 'on' ? 'on' : 'off' // 脏值一律按 off
     },
     panelSide: s.panelSide === 'left' ? 'left' : 'right' // 缺省/脏值一律按 right（v0.5.1 起新默认）
   };

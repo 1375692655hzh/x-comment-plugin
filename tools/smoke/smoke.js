@@ -59,7 +59,7 @@ const t = (name, ok, extra) => {
 const oauthState = { grant: false };
 // 真实生成链路 mock：记录请求体供断言；reply 可注入自定义回复；
 // emptyLength='once' 模拟"推理模型思考耗尽"一次（finish_reason=length+空 content+reasoning_content），'always' 持续耗尽
-const mockLLM = { count: 0, lastBody: null, lastAuth: '', reply: null, emptyLength: null, emptyLengthHit: 0 };
+const mockLLM = { count: 0, lastBody: null, lastAuth: '', reply: null, humReply: null, emptyLength: null, emptyLengthHit: 0 };
 
 const server = http.createServer((req, res) => {
   const send = (code, body, type) => {
@@ -95,13 +95,27 @@ const server = http.createServer((req, res) => {
       mockLLM.lastAuth = req.headers['authorization'] || '';
       mockLLM.count++;
       let model = '';
+      let sysTxt = '';
       try {
-        model = JSON.parse(raw).model;
+        const parsed = JSON.parse(raw);
+        model = parsed.model;
+        sysTxt = parsed.messages && parsed.messages[0] ? String(parsed.messages[0].content) : '';
       } catch (e) {
         /* 忽略 */
       }
       if (model === 'missing-model') {
         return send(404, { error: { message: 'model not found: missing-model' } });
+      }
+      // 去AI味二段"人味改写"请求：返回可识别的改写结果（供输出框断言）
+      if (sysTxt.includes('人味改写器')) {
+        return send(200, {
+          id: 'chatcmpl-smoke-hum',
+          object: 'chat.completion',
+          model,
+          choices: [
+            { index: 0, message: { role: 'assistant', content: mockLLM.humReply || 'SMOKE-HUMANIZED 人味改写结果' }, finish_reason: 'stop' }
+          ]
+        });
       }
       if (mockLLM.emptyLength && (mockLLM.emptyLength === 'always' || mockLLM.emptyLengthHit < 1)) {
         // 推理模型思考耗尽形态：思考占满 max_tokens，正文为空
@@ -657,6 +671,48 @@ const server = http.createServer((req, res) => {
       if (!over) throw new Error('超 280 未标红');
       if ((await page.locator('.xcc-target-len').isVisible())) throw new Error('免费模式不应显示目标字数');
       return cnt;
+    });
+
+    await step('去AI味开关：开启后二段人味改写请求与改写结果回填', async () => {
+      const humBtn = page.locator('.xcc-hum');
+      const initTxt = await humBtn.innerText();
+      if (!initTxt.includes('关')) throw new Error('去AI味开关初始态异常: ' + initTxt);
+      await humBtn.click();
+      await page.waitForTimeout(600); // mutateSettings → storage.onChanged → refreshSettings
+      if (!(await humBtn.evaluate((el) => el.classList.contains('on')))) throw new Error('开关未高亮');
+      // storage 读取走扩展页（普通网页主世界无 chrome.storage）
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      const saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.genParams.humanize;
+      });
+      if (saved !== 'on') throw new Error('humanize 未落盘: ' + saved);
+      // 生成 → 恰好 2 次请求；第二次=人味改写（system 标记 + 280 硬约束 + 携带第一段结果）
+      const before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15000 && mockLLM.count < before + 2) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (mockLLM.count !== before + 2) {
+        throw new Error('应恰好 2 次请求（初稿+改写），实际 ' + (mockLLM.count - before));
+      }
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      const sys = String((body.messages || [])[0] && body.messages[0].content);
+      const usr = String((body.messages || [])[1] && body.messages[1].content);
+      if (!sys.includes('人味改写器')) throw new Error('二段请求 system 非人味改写: ' + sys.slice(0, 40));
+      if (!sys.includes('280')) throw new Error('免费模式改写段未带 280 硬约束');
+      if (!usr.includes('SMOKE-GEN 固定回复')) throw new Error('二段请求未携带第一段结果: ' + usr.slice(0, 40));
+      const out = await page.locator('.xcc-out').inputValue();
+      if (!out.includes('SMOKE-HUMANIZED')) throw new Error('输出框非改写结果: ' + out.slice(0, 40));
+      await page.waitForFunction(() => {
+        const st = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-status');
+        return !!(st && st.textContent.includes('已去AI味'));
+      }, null, { timeout: 10000 });
+      // 收尾关掉，避免污染后续步骤的"每次生成恰好 1 次请求"断言
+      await humBtn.click();
+      await page.waitForTimeout(600);
+      return '2 次请求，改写回填';
     });
 
     await step('面板切换付费模式：目标字数输入出现并即时落盘', async () => {

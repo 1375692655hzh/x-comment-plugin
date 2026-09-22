@@ -107,6 +107,17 @@ check(content.includes('editorMatchesTarget'), '填入前校验编辑器匹配�
 check(content.includes('弹出的回复框'), '状态栏标明填入位置（弹层/页面框）');
 check(content.includes("new InputEvent('input'"), 'insertInto 有 DOM 直插+input 派发兜底路径');
 
+// 5.8 v0.5.9 门禁：去AI味（生成后二段"人味改写"）
+check(sw.includes('function buildHumanizeMessages'), 'SW 有人味改写提示词组装函数');
+check(sw.includes('人味改写器'), 'SW 人味改写 system 含身份标记（冒烟 mock 按此识别二段请求）');
+check(sw.includes("s.genParams.humanize === 'on'"), 'GENERATE 挂接 humanize 开关分支');
+check(sw.includes('humanizeError'), '改写失败回退原稿且不连坐第一段成果');
+check(common.includes("humanize: 'off'"), 'XCC_DEFAULTS.genParams.humanize 默认关');
+check(common.includes("humanize: s.genParams.humanize === 'on'"), 'xccPublicSettings 透出 humanize（脏值按关）');
+check(content.includes('hum-toggle') && content.includes('function renderHumanize'), '面板存在去AI味开关与渲染函数');
+check(content.includes('已去AI味'), '状态栏标注去AI味结果');
+check(read('tools/smoke/smoke.js').includes('SMOKE-HUMANIZED'), '冒烟覆盖去AI味二段链路');
+
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));
 const refs = [

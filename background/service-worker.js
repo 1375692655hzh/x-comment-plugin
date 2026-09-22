@@ -91,6 +91,34 @@ function buildMessages(s, req) {
   ];
 }
 
+// 去AI味二段改写（v0.5.9）：第一段生成结果再走一遍"人味改写"。
+// 规则参考 blader/humanizer 与 op7418/Humanizer-zh 的 AI 痕迹清单（杀"不只是X更是Y"
+// 句式/三项排比/AI 高频词/总结升华句，注入长短句交错与具体细节），按短评场景自写。
+// 硬约束：不改观点倾向、不新增事实、长度不超第一段的账号模式约束，语言跟随原设置。
+function buildHumanizeMessages(s, text) {
+  let sys =
+    '你是社交平台评论的"人味改写器"：把给出的评论改写得像真人随手发的帖子，' +
+    '只输出改写后的评论本身，不要任何说明或前后语。改写规则：\n' +
+    '- 直接说事：删掉"不只是X，更是Y"句式、总结升华句、"其实/说白了/值得注意的是"类铺垫\n' +
+    '- 打破工整：不用三项排比、不用整齐对仗，长短句随意交错，能短则短\n' +
+    '- 说人话：不用"深入、格局、赋能、无疑、彰显、令人"这类 AI 高频词，换最平实的说法\n' +
+    '- 像打字不像写作：可以有口语、省略、轻微的语气和情绪，别堆 emoji，不用 markdown\n' +
+    '- 具体优先：抽象概括换成具体细节；没有可换的就保持原样，绝不编造新事实';
+  if (s.genParams.language === 'zh') sys += '\n\n保持中文。';
+  else if (s.genParams.language === 'en') sys += '\n\nKeep it in English.';
+  else sys += '\n\n保持原评论的语言不变。';
+  // 长度约束与第一段一致：免费 280 硬约束（改写不得变长突破上限）；付费模糊参考
+  if (s.genParams.xPlan === 'premium') {
+    sys += '\n\n长度与原评论相近即可，不得明显变长。';
+  } else {
+    sys += '\n\n长度硬约束：改写结果总长不得超过 280 个字符（含标点、空格与 emoji）。';
+  }
+  return [
+    { role: 'system', content: sys },
+    { role: 'user', content: '原评论：\n' + text }
+  ];
+}
+
 // ---------- 消息路由（GENERATE 为主；其余为兼容兜底） ----------
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -99,9 +127,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'GENERATE': {
         const s = await xccGetSettings();
         const cfg = await xccResolveProviderCfg(s);
-        const messages = buildMessages(s, msg);
-        const text = await xccChatCompletion(cfg, messages, s.genParams);
-        return sendResponse({ ok: true, text });
+        let text = await xccChatCompletion(cfg, buildMessages(s, msg), s.genParams);
+        let humanized = false;
+        let humanizeError = '';
+        // 去AI味：第二段"人味改写"。失败不连坐第一段成果——回退原稿继续可用
+        if (s.genParams.humanize === 'on' && text) {
+          try {
+            text = await xccChatCompletion(cfg, buildHumanizeMessages(s, text), s.genParams);
+            humanized = true;
+          } catch (e) {
+            humanizeError = e && e.message ? e.message : String(e);
+          }
+        }
+        return sendResponse({ ok: true, text, humanized, humanizeError });
       }
       case 'OPEN_OPTIONS': {
         chrome.runtime.openOptionsPage();
