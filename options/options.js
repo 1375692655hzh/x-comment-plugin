@@ -791,6 +791,9 @@ function initUpdateBanner() {
 
 (async function init() {
   healOrphanPage(); // 必须最先：孤儿页下后续所有 chrome.* 调用都会抛错
+  // 标题带当前版本（远程支援/自检核版本用，防"装的是旧文件夹"混淆）
+  const h1 = document.querySelector('h1');
+  if (h1) h1.textContent += ' · v' + chrome.runtime.getManifest().version;
   try {
     await loadSettings();
     // 能读到 storage 说明本页健康：清除自愈标记，把"reload 一次"的额度还给本标签页
