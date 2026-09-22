@@ -123,6 +123,25 @@ check(oh.includes('id="custom-proxy-help"'), '设置页存在分流说明折叠�
 check(oh.includes('代理IP黑名单') && oh.includes('*模型域名'), '分流说明含比特浏览器具体操作路径');
 check(oj.includes("help.open = true"), '诊断命中网络不通时自动展开分流说明');
 
+// 5.10 v0.5.11 门禁：预设收敛 + 默认参数 + 醒目控件 + 分流说明标红
+{
+  const personaCount = (common.match(/id: 'p-/g) || []).length;
+  check(personaCount === 1 && common.includes("name: '自然网友'"), '人设预设只含「自然网友」');
+  for (const nm of ['认同 + 补充观点', '犀利提问', '幽默玩梗', '省流党', '深度分析']) {
+    check(common.includes(`name: '${nm}'`), `生成风格预设存在「${nm}」`);
+  }
+  check(
+    !common.includes('p-crypto') && !common.includes('p-dev') && !common.includes('g-topic') && !common.includes('g-insight'),
+    '旧预设（加密观察者/独立开发者/观点输出/原创推文）已移除'
+  );
+  check(common.includes('maxTokens: 1000'), '默认最大生成长度 1000');
+  check(common.includes("language: 'zh'"), '默认语言强制中文');
+  check(common.includes('presetsV2'), '存在 presetsV2 迁移标记');
+  check(content.includes('button.xcc-set') && content.includes('>⚙ 设置<'), '面板设置入口为醒目「⚙ 设置」按钮');
+  check(content.includes('border-radius: 999px') && content.includes('button.xcc-hum.on'), '去AI味开关为胶囊按钮样式');
+  check(read('options/options.css').includes('#custom-proxy-help > summary'), '分流说明 summary 标红样式');
+}
+
 // 6. manifest 引用的文件都存在
 const man = JSON.parse(read('manifest.json'));
 const refs = [

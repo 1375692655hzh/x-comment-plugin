@@ -237,6 +237,20 @@ const server = http.createServer((req, res) => {
         if (provider.includes('加载中') || provider.includes('连接后台失败')) throw new Error(provider);
         return provider;
       });
+      await step('预设收敛（v0.5.11）：人设仅自然网友，生成风格五件套', async () => {
+        const personas = await page.locator('.xcc-persona option').allInnerTexts();
+        if (personas.length !== 1 || !personas[0].includes('自然网友')) {
+          throw new Error('人设预设异常: ' + JSON.stringify(personas));
+        }
+        const gens = (await page.locator('.xcc-gen option').allInnerTexts()).map((t) => t.trim());
+        if (gens.length !== 5) throw new Error('生成风格应 5 个: ' + JSON.stringify(gens));
+        for (const want of ['认同', '犀利提问', '幽默玩梗', '省流党', '深度分析']) {
+          if (!gens.some((n) => n.includes(want))) {
+            throw new Error('缺风格预设 ' + want + ': ' + JSON.stringify(gens));
+          }
+        }
+        return gens.join('、');
+      });
       await step('生成风格下拉有选项且可切换', async () => {
         const n = await page.locator('.xcc-gen option').count();
         if (!n) throw new Error('下拉无选项（后台设置未填充）');
@@ -1112,6 +1126,39 @@ const server = http.createServer((req, res) => {
         m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'm-a', models: ['m-a', 'm-b'] };
         await chrome.storage.local.set({ settings: m });
       });
+    });
+
+    // v0.5.11 预设收敛迁移：旧数据一次性升级（纯 merge 校验，不写盘）
+    await step('预设收敛迁移：旧预设/旧默认参数一次性升级且保留自定义值', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      const r = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const clone = (o) => JSON.parse(JSON.stringify(o));
+        // 旧数据形态：无 presetsV2、自定义过的旧预设、旧默认参数
+        const old = clone(settings);
+        delete old.presetsV2;
+        old.personaPresets = [{ id: 'p-old', name: '旧人设', persona: 'x' }];
+        old.genPresets = [{ id: 'g-topic', name: '原创推文', prompt: 'x' }];
+        old.activePersonaId = 'p-old';
+        old.activeGenId = 'g-topic';
+        old.genParams = { ...(old.genParams || {}), maxTokens: 400, language: 'auto' };
+        const m1 = xccMergeSettings(old);
+        // 用户明确自定义过的参数不被迁移覆盖（≠旧默认即视为动过）
+        const customParams = clone(old);
+        customParams.genParams = { ...(customParams.genParams || {}), maxTokens: 2000, language: 'en' };
+        const m2 = xccMergeSettings(customParams);
+        return {
+          n: m1.personaPresets.length + '/' + m1.genPresets.length,
+          ids: m1.activePersonaId + '/' + m1.activeGenId,
+          gp: m1.genParams.maxTokens + '/' + m1.genParams.language + '/' + m1.presetsV2,
+          keep: m2.genParams.maxTokens + '/' + m2.genParams.language
+        };
+      });
+      if (r.n !== '1/5') throw new Error('预设未收敛: ' + r.n);
+      if (r.ids !== 'p-general/g-agree') throw new Error('active 未重置到新预设: ' + r.ids);
+      if (r.gp !== '1000/zh/true') throw new Error('默认参数未升级: ' + r.gp);
+      if (r.keep !== '2000/en') throw new Error('自定义参数被覆盖: ' + r.keep);
+      return r.n + ' / ' + r.gp;
     });
 
     // v0.5.0 面板左右切换（storage.onChanged → applySettings → .left 类）；v0.5.1 默认右侧

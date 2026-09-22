@@ -120,3 +120,9 @@ code {
 .model-row .model-id { flex: 1; font-family: Consolas, monospace; }
 .model-row.active .model-id { border-color: var(--brand); }
 .model-add-row input { flex: 1; }
+
+/* v0.5.11 分流说明（连不通？）标红——用户要求醒目：红字加粗，让代理环境用户第一眼看到 */
+#custom-proxy-help > summary {
+  color: #ef4444; font-weight: 600; cursor: pointer;
+}
+#custom-proxy-help[open] > summary { color: #dc2626; }

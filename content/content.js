@@ -100,6 +100,13 @@
       font-size: 13px; padding: 2px 5px; border-radius: 6px;
     }
     .xcc-mini:hover { background: rgba(255,255,255,.1); color: #e7e9ea; }
+    /* 设置入口（v0.5.11 用户要求加醒目）：头部主视觉按钮，带文字不再只是小齿轮 */
+    button.xcc-set {
+      background: linear-gradient(135deg, rgba(139,92,250,.4), rgba(79,70,229,.4));
+      border: 1px solid rgba(124,143,245,.6); color: #e0e5ff;
+      font-size: 12.5px; font-weight: 600; padding: 4px 12px; border-radius: 999px;
+    }
+    button.xcc-set:hover { filter: brightness(1.15); color: #fff; }
     .xcc-provider { font-size: 11px; color: #9ca3af; }
     .xcc-provider.warn { color: #f59e0b; }
     .xcc-update {
@@ -153,11 +160,18 @@
     .xcc-gen-btn:disabled { opacity: .55; cursor: not-allowed; }
     .xcc-out-bar { display: flex; justify-content: space-between; align-items: center; flex: 0 0 auto;
       min-height: 14px; margin-bottom: -2px; }
-    /* 去AI味开关（v0.5.9）：常驻输出框上方左侧；开启后每次生成多走一遍"人味改写" */
-    button.xcc-hum { background: none; border: none; padding: 0; cursor: pointer;
-      font-size: 11px; color: #9ca3af; line-height: 1.2; }
-    button.xcc-hum:hover { color: #e7e9ea; }
-    button.xcc-hum.on { color: #a5b4fc; font-weight: 600; }
+    /* 去AI味开关（v0.5.9）：常驻输出框上方左侧；开启后每次生成多走一遍"人味改写"。
+       v0.5.11 起改为胶囊按钮（用户要求加醒目），样式与倾向/模式按钮同族 */
+    button.xcc-hum {
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.16);
+      border-radius: 999px; padding: 4px 12px; cursor: pointer;
+      font-size: 12px; color: #9ca3af; line-height: 1.3;
+    }
+    button.xcc-hum:hover { background: rgba(255,255,255,.1); color: #e7e9ea; }
+    button.xcc-hum.on {
+      color: #fff; font-weight: 600; border-color: #7c8ff5;
+      background: linear-gradient(135deg, rgba(139,92,250,.5), rgba(79,70,229,.5));
+    }
     .xcc-count { font-size: 11px; color: #9ca3af; line-height: 1.2; }
     .xcc-count.over { color: #f87171; font-weight: 600; }
     /* 生成输出框：v0.5.0 侧栏形态的主区，弹性伸展且占比最大（约为推文框 2.4 倍） */
@@ -192,7 +206,7 @@
     <div class="xcc-head">
       <span class="xcc-title">✦ 评论副驾</span>
       <span>
-        <button class="xcc-mini" data-act="settings" title="打开设置">⚙</button>
+        <button class="xcc-set" data-act="settings" title="打开设置（模型接入 / 提示词 / 生成参数）">⚙ 设置</button>
         <button class="xcc-mini" data-act="close" title="收起面板">✕</button>
       </span>
     </div>

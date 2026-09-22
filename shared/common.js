@@ -52,29 +52,19 @@ const XCC_DEFAULTS = {
     tokens: null // { access_token, refresh_token, expires_at }
   },
 
-  // 人设提示词：定义"你是谁"（语气/身份/领域/表达习惯），作为 system 提示词
+  // 人设提示词：定义"你是谁"（语气/身份/领域/表达习惯），作为 system 提示词。
+  // v0.5.11 起只内置一个「自然网友」（用户要求：预设人设只保留自然网友）
   personaPresets: [
     {
       id: 'p-general',
-      name: '自然网友（默认）',
+      name: '自然网友',
       persona:
         '你是 X 上一位活跃的资深网友，见解独到、表达自然。像真人一样说话：不用 AI 腔，不写"首先/其次/总之"，不堆砌感叹号，不用列表体。观点具体，偶尔带点幽默。'
-    },
-    {
-      id: 'p-crypto',
-      name: '加密行业观察者',
-      persona:
-        '你是加密行业的深度参与者，熟悉 DeFi、L2、AI×Crypto 等话题，说话像真正的 crypto native：会用 alpha、DYOR、叙事、fomo 这类行业语，但不卖弄、不喊单、不给出投资建议，语气笃定又克制。'
-    },
-    {
-      id: 'p-dev',
-      name: '独立开发者',
-      persona:
-        '你是一位独立开发者，懂前端、后端和 AI 应用开发。聊技术时给出具体、可验证的观点和亲身实践，语气平和自信，不夸大，遇到营销味重的说法会温和地点破。'
     }
   ],
 
   // 生成提示词：定义"怎么写"。占位符：{tweet_text} {author} {topic}
+  // v0.5.11 五件套：认同+补充观点 / 犀利提问 / 幽默玩梗 / 省流党 / 深度分析
   genPresets: [
     {
       id: 'g-agree',
@@ -95,16 +85,16 @@ const XCC_DEFAULTS = {
         '用轻松幽默的方式回复这条推文，可以适度玩梗或善意反讽，但要友好、不冒犯、不阴阳怪气，不超过 160 字符。\n\n推文内容：\n{tweet_text}'
     },
     {
-      id: 'g-insight',
-      name: '观点输出',
+      id: 'g-tldr',
+      name: '省流党',
       prompt:
-        '以第一人称输出你对这条推文话题的核心观点：结论先行，给一到两个具体理由，结尾可留一个开放性问题引别人来聊。不超过 240 字符，口语化。\n\n推文内容：\n{tweet_text}'
+        '像省流党一样回复这条推文：先以"省流："开头，一句话总结它的核心（或戳破它没说的前提），再跟一句你自己的短评。全文不超过 120 字符，口语化。\n\n推文内容：\n{tweet_text}'
     },
     {
-      id: 'g-topic',
-      name: '原创推文（按主题）',
+      id: 'g-deep',
+      name: '深度分析',
       prompt:
-        '根据主题写一条原创推文：开头一句必须抓眼球，正文 2-3 句有真实信息量，结尾引导互动。不超过 280 字符，不堆砌 hashtag。\n\n主题：{topic}'
+        '回复这条推文并做深度分析：点出容易被忽略的关键变量、逻辑漏洞或背景信息，给出一到两个具体依据（数据、案例或亲身经历）。保持评论体、别写成长文，不超过 280 字符，不端着、不用学术腔。\n\n推文内容：\n{tweet_text}'
     }
   ],
 
@@ -118,8 +108,10 @@ const XCC_DEFAULTS = {
 
   genParams: {
     temperature: 0.9,
-    maxTokens: 400,
-    language: 'auto',
+    // v0.5.11 起 1000（旧默认 400 对推理模型偏小，用户定 1000）
+    maxTokens: 1000,
+    // v0.5.11 起默认强制中文（旧默认 'auto' 跟随推文语言）；'en' 强制英文
+    language: 'zh',
     // 思考强度：'default' 不发送该参数（对不支持的端点零影响）| 'low' | 'medium' | 'high'
     reasoningEffort: 'default',
     // 账号模式：'free' = X 免费用户（280 字符上限，生成时注入硬约束）| 'premium' = 付费不限长
@@ -131,7 +123,10 @@ const XCC_DEFAULTS = {
   },
 
   // 面板停靠侧：'left' | 'right'（全高侧边栏形态，v0.5.1 起默认右侧）
-  panelSide: 'right'
+  panelSide: 'right',
+
+  // 预设结构版本标记（v0.5.11）：旧数据没有此标记 → xccMergeSettings 执行一次预设收敛迁移
+  presetsV2: true
 };
 
 // 把 chrome.storage.local 中保存的 settings 合并到默认值上（兼容旧版本缺字段）
@@ -156,19 +151,43 @@ function xccMergeSettings(saved) {
   }
   if (!customModels.includes(custom.model)) custom.model = customModels[0];
   custom.models = [...new Set(customModels)];
+  // v0.5.11 预设收敛迁移（presetsV2 标记，对旧数据只执行一次，写盘随任意一次
+  // 设置变更持久化）：
+  // ① 人设只留「自然网友」、生成风格换五件套（认同+补充/犀利提问/幽默玩梗/省流党/深度分析）
+  // ② 从未动过的默认参数顺手升级：maxTokens 旧默认 400→1000、language 旧默认 auto→强制中文；
+  //    用户自定义过的值不动（≠旧默认即视为动过）
+  let personaPresets =
+    Array.isArray(s.personaPresets) && s.personaPresets.length
+      ? s.personaPresets
+      : XCC_DEFAULTS.personaPresets;
+  let genPresets =
+    Array.isArray(s.genPresets) && s.genPresets.length ? s.genPresets : XCC_DEFAULTS.genPresets;
+  let activePersonaId = s.activePersonaId;
+  let activeGenId = s.activeGenId;
+  const genParams = { ...XCC_DEFAULTS.genParams, ...(s.genParams || {}) };
+  if (!s.presetsV2) {
+    personaPresets = XCC_DEFAULTS.personaPresets;
+    genPresets = XCC_DEFAULTS.genPresets;
+    if (genParams.maxTokens === 400) genParams.maxTokens = 1000;
+    if (!genParams.language || genParams.language === 'auto') genParams.language = 'zh';
+  }
+  // active 指向已删除的预设时收敛到首个（防下拉空选中/GENERATE 走错预设）
+  if (!personaPresets.some((p) => p.id === activePersonaId)) {
+    activePersonaId = personaPresets[0].id;
+  }
+  if (!genPresets.some((g) => g.id === activeGenId)) activeGenId = genPresets[0].id;
   return {
     ...XCC_DEFAULTS,
     ...s,
     xai: { ...XCC_DEFAULTS.xai, ...(s.xai || {}) },
     custom,
     grokOAuth,
-    genParams: { ...XCC_DEFAULTS.genParams, ...(s.genParams || {}) },
-    personaPresets:
-      Array.isArray(s.personaPresets) && s.personaPresets.length
-        ? s.personaPresets
-        : XCC_DEFAULTS.personaPresets,
-    genPresets:
-      Array.isArray(s.genPresets) && s.genPresets.length ? s.genPresets : XCC_DEFAULTS.genPresets
+    genParams,
+    personaPresets,
+    genPresets,
+    activePersonaId,
+    activeGenId,
+    presetsV2: true
   };
 }
 
