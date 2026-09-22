@@ -31,11 +31,18 @@ const XCC_DEFAULTS = {
   xai: { apiKey: '', model: 'grok-4-fast-non-reasoning' },
 
   custom: {
+    name: '自定义接口', // 供应商显示名（v0.5.12；首个自定义接口=主槽位，历史字段结构不变）
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
     model: 'gpt-4o-mini', // 当前使用（active），恒 ∈ models（v0.5.3 起约束）
     models: ['gpt-4o-mini'] // 可用模型列表（设置页可增删，面板顶部下拉数据源）
   },
+
+  // 额外的 OpenAI 兼容供应商档案（v0.5.12 多供应商）：结构与主槽位 custom 一致，
+  // 另带 id。供应商列表 = [xAI, 主槽位 custom, Grok 授权, ...customVendors]
+  customVendors: [],
+  // provider==='custom' 时，实际使用哪个自定义档案：'primary'（主槽位）或 customVendors 的 id
+  activeCustomVendorId: 'primary',
 
   // Grok 账号授权（OAuth 2.0 Device Flow，grok CLI 同款）。
   // 端点与公开 client_id 取自 xai-org/grok-build 开源实现（社区包 @piex-dev/xai-oauth 同款），
@@ -151,6 +158,38 @@ function xccMergeSettings(saved) {
   }
   if (!customModels.includes(custom.model)) custom.model = customModels[0];
   custom.models = [...new Set(customModels)];
+  // v0.5.12 多供应商：额外档案逐个做与主槽位同款的规范化
+  // （从"合并前的原始存储值"判断 models，收敛规则同 v0.5.3 的 P0 修复）
+  const rawVendors = Array.isArray(s.customVendors) ? s.customVendors : [];
+  const customVendors = [];
+  const seenIds = new Set();
+  for (const rv of rawVendors) {
+    if (!rv || typeof rv !== 'object') continue;
+    let id = String(rv.id || '').trim() || xccUid('cv');
+    while (seenIds.has(id)) id = xccUid('cv'); // id 去重，防切换串档
+    seenIds.add(id);
+    const v = {
+      id,
+      kind: 'custom',
+      name: String(rv.name || '').trim() || '未命名接口',
+      baseUrl: String(rv.baseUrl || '').trim(),
+      apiKey: String(rv.apiKey || ''),
+      model: String(rv.model || '').trim() || 'gpt-4o-mini'
+    };
+    let vModels = Array.isArray(rv.models)
+      ? rv.models.map((m) => String(m || '').trim()).filter(Boolean)
+      : [];
+    if (!vModels.length) vModels = [v.model];
+    if (!vModels.includes(v.model)) v.model = vModels[0];
+    v.models = [...new Set(vModels)];
+    customVendors.push(v);
+  }
+  const activeCustomVendorId =
+    s.activeCustomVendorId && s.activeCustomVendorId !== 'primary'
+      ? customVendors.some((v) => v.id === s.activeCustomVendorId)
+        ? s.activeCustomVendorId
+        : 'primary'
+      : 'primary';
   // v0.5.11 预设收敛迁移（presetsV2 标记，对旧数据只执行一次，写盘随任意一次
   // 设置变更持久化）：
   // ① 人设只留「自然网友」、生成风格换五件套（认同+补充/犀利提问/幽默玩梗/省流党/深度分析）
@@ -181,6 +220,8 @@ function xccMergeSettings(saved) {
     ...s,
     xai: { ...XCC_DEFAULTS.xai, ...(s.xai || {}) },
     custom,
+    customVendors,
+    activeCustomVendorId,
     grokOAuth,
     genParams,
     personaPresets,
@@ -193,6 +234,16 @@ function xccMergeSettings(saved) {
 
 function xccUid(prefix) {
   return prefix + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+// 当前生效的自定义接口配置（v0.5.12 多供应商）：
+// provider==='custom' 时按 activeCustomVendorId 取额外档案，否则（含脏值/缺省）回落主槽位 s.custom。
+// 返回的带 id 字段（'primary' 或档案 id），供 UI 反写定位。
+function xccActiveCustom(s) {
+  const wantId = s.activeCustomVendorId;
+  const list = Array.isArray(s.customVendors) ? s.customVendors : [];
+  const v = wantId && wantId !== 'primary' ? list.find((x) => x && x.id === wantId) : null;
+  return v ? { ...v, id: v.id } : { ...s.custom, id: 'primary' };
 }
 
 // 最新版 ZIP 下载地址（更新提示直达用，content/options 直接 window.open）
@@ -216,20 +267,29 @@ function xccIsNewerVersion(a, b) {
 function xccPublicSettings(s) {
   const isXai = s.provider === 'xai';
   const isCustom = s.provider === 'custom';
-  const model = isXai ? s.xai.model : isCustom ? s.custom.model : s.grokOAuth.model;
-  const label =
-    s.provider === 'xai'
-      ? 'xAI API · ' + model
-      : s.provider === 'custom'
-        ? '自定义 · ' + model
-        : 'Grok 授权 · ' + model;
+  const acc = xccActiveCustom(s); // provider 非 custom 时也返回主槽位（供列表 ready 计算）
+  const model = isXai ? s.xai.model : isCustom ? acc.model : s.grokOAuth.model;
+  // v0.5.12 供应商列表：xAI / 首个自定义（主槽位）/ Grok 授权 / 额外自定义档案
+  const vendorList = [
+    { id: 'xai', name: 'xAI API', ready: !!s.xai.apiKey },
+    { id: 'primary', name: s.custom.name || '自定义接口', ready: !!s.custom.baseUrl },
+    { id: 'grok-oauth', name: 'Grok 授权', ready: !!(s.grokOAuth.tokens && s.grokOAuth.tokens.access_token) },
+    ...(Array.isArray(s.customVendors) ? s.customVendors : []).map((v) => ({
+      id: v.id,
+      name: v.name,
+      ready: !!v.baseUrl
+    }))
+  ];
+  const activeVendorId = isXai ? 'xai' : !isCustom ? 'grok-oauth' : acc.id;
+  const activeVendorName = (vendorList.find((v) => v.id === activeVendorId) || vendorList[0]).name;
+  const label = activeVendorName + ' · ' + model;
   // v0.5.3：面板顶部模型下拉数据源（按接入方式合并去重，恒含当前值）
   let modelCandidates;
   let modelVerified = []; // 仅 grok-oauth 非空：已确认在账号目录内的 ID（「已验证」标注集合）
   if (isXai) {
     modelCandidates = [...new Set([...XCC_XAI_MODEL_CANDIDATES, model])];
   } else if (isCustom) {
-    const arr = Array.isArray(s.custom.models) ? s.custom.models : [];
+    const arr = Array.isArray(acc.models) ? acc.models : [];
     modelCandidates = [...new Set([...(arr.length ? arr : [model]), model])];
   } else {
     const disc = Array.isArray(s.grokOAuth.discoveredModels) ? s.grokOAuth.discoveredModels : [];
@@ -240,12 +300,15 @@ function xccPublicSettings(s) {
     enabled: s.enabled !== false,
     provider: s.provider,
     providerLabel: label,
+    vendorList, // 全部供应商（id/name/ready），面板供应商下拉数据源
+    activeVendorId,
+    activeVendorName,
     model, // 当前使用的模型 ID（面板下拉选中项 = GENERATE 实际使用）
     modelCandidates, // 候选顺序即展示顺序
     modelVerified, // 空数组 = 不做「已验证/未验证」标注
     ready: {
       xai: !!s.xai.apiKey,
-      custom: !!s.custom.baseUrl,
+      custom: isCustom ? !!acc.baseUrl : !!s.custom.baseUrl,
       'grok-oauth': !!(s.grokOAuth.tokens && s.grokOAuth.tokens.access_token)
     },
     personaPresets: s.personaPresets,

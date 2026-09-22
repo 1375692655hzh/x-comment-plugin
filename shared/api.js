@@ -180,8 +180,10 @@ async function xccResolveProviderCfg(s) {
     return { baseUrl: 'https://api.x.ai/v1', apiKey: s.xai.apiKey, model: s.xai.model };
   }
   if (s.provider === 'custom') {
-    if (!s.custom.baseUrl) throw new Error('尚未配置自定义接口地址，请打开设置页填写');
-    return { baseUrl: s.custom.baseUrl, apiKey: s.custom.apiKey || '', model: s.custom.model };
+    // v0.5.12 多供应商：按 activeCustomVendorId 取档案（回落主槽位 s.custom）
+    const c = xccActiveCustom(s);
+    if (!c.baseUrl) throw new Error('尚未配置自定义接口地址，请打开设置页填写');
+    return { baseUrl: c.baseUrl, apiKey: c.apiKey || '', model: c.model };
   }
   if (s.provider === 'grok-oauth') {
     const o = s.grokOAuth;

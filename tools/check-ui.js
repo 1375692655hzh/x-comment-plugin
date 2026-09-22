@@ -140,6 +140,16 @@ check(oj.includes("help.open = true"), '诊断命中网络不通时自动展开�
   check(content.includes('button.xcc-set') && content.includes('>⚙ 设置<'), '面板设置入口为醒目「⚙ 设置」按钮');
   check(content.includes('border-radius: 999px') && content.includes('button.xcc-hum.on'), '去AI味开关为胶囊按钮样式');
   check(read('options/options.css').includes('#custom-proxy-help > summary'), '分流说明 summary 标红样式');
+
+// 5.11 v0.5.12 门禁：多供应商（xAI / 主槽位 custom / Grok 授权 + customVendors 额外档案）
+check(common.includes('customVendors: []') && common.includes("activeCustomVendorId: 'primary'"), 'XCC_DEFAULTS 含 customVendors 与 activeCustomVendorId');
+check(common.includes('function xccActiveCustom'), 'common 有活动档案解析 xccActiveCustom');
+check(common.includes('vendorList'), 'xccPublicSettings 透出 vendorList');
+check(read('shared/api.js').includes('xccActiveCustom(s)'), 'api.js custom 分支走活动档案');
+check(oh.includes('id="vendor-list"') && oh.includes('id="vendor-add"'), '设置页存在供应商列表与新增按钮');
+check(oj.includes('function mutateActiveCustom') && oj.includes('activeCustomVendorId'), '设置页写回走活动档案');
+check(content.includes('xcc-vendor') && content.includes('function renderVendors'), '面板存在供应商下拉与渲染函数');
+check(sw.includes('xccResolveProviderCfg'), 'GENERATE 经供应商解析取配置');
 }
 
 // 6. manifest 引用的文件都存在

@@ -17,20 +17,13 @@
 
   <!-- ========== 模型接入 ========== -->
   <section class="card">
-    <h2>模型接入</h2>
-    <div class="provider-list">
-      <label class="provider-item">
-        <input type="radio" name="provider" value="xai">
-        <span class="pi-body"><b>xAI API Key</b><i>console.x.ai 申请，开箱即用</i></span>
-      </label>
-      <label class="provider-item">
-        <input type="radio" name="provider" value="custom">
-        <span class="pi-body"><b>自定义 OpenAI 兼容接口</b><i>OpenAI / DeepSeek / Kimi / OpenRouter / Ollama 等</i></span>
-      </label>
-      <label class="provider-item">
-        <input type="radio" name="provider" value="grok-oauth">
-        <span class="pi-body"><b>Grok 账号授权（订阅额度）</b><i>SuperGrok / X Premium+ 订阅登录，与 grok CLI 同款</i></span>
-      </label>
+    <h2>模型接入（供应商）</h2>
+    <p class="hint">可保存多家供应商同时在线（xAI / Grok 授权 / 任意多个 OpenAI 兼容接口），
+      点左侧圆点设为当前使用；表单编辑的是当前选中的供应商。面板顶部可随时一键切换。</p>
+    <div id="vendor-list"></div>
+    <div class="row model-add-row">
+      <input id="vendor-new-name" placeholder="新增供应商名称：火山方舟 / DeepSeek / Kimi 中转站…">
+      <button class="small" id="vendor-add">＋ 新增供应商（OpenAI 兼容）</button>
     </div>
 
     <div class="provider-pane" id="pane-xai">

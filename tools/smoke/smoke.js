@@ -233,9 +233,10 @@ const server = http.createServer((req, res) => {
         return tweetBd.slice(0, 40);
       });
       await step('后台消息链路(SW)正常', async () => {
-        const provider = await page.locator('.xcc-provider').innerText();
-        if (provider.includes('加载中') || provider.includes('连接后台失败')) throw new Error(provider);
-        return provider;
+        // v0.5.12：provider 文本行已由供应商下拉取代；设置已填充 = 下拉有合法选中值
+        const vend = await page.locator('.xcc-vendor').inputValue();
+        if (!vend) throw new Error('供应商下拉为空（设置未填充）');
+        return vend;
       });
       await step('预设收敛（v0.5.11）：人设仅自然网友，生成风格五件套', async () => {
         const personas = await page.locator('.xcc-persona option').allInnerTexts();
@@ -432,7 +433,7 @@ const server = http.createServer((req, res) => {
       await page.waitForTimeout(1800);
       const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
       if (!optsPage) throw new Error('未发现设置页标签');
-      const ready = await optsPage.locator('.provider-item').count();
+      const ready = await optsPage.locator('.vendor-row').count();
       if (ready < 3) throw new Error('设置页渲染异常');
       // 全局自动接受 confirm：删除模型等确认框一旦无人处理，页面所有后续操作会被
       // Playwright 永久挂起（v0.5.3 实测卡死根因）。测试内 confirm 全部意图为"允许"。
@@ -487,6 +488,7 @@ const server = http.createServer((req, res) => {
         const { settings } = await chrome.storage.local.get('settings');
         const m = xccMergeSettings(settings);
         m.provider = 'custom';
+        m.activeCustomVendorId = 'primary';
         m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'smoke-model' };
         m.genParams = { ...m.genParams, reasoningEffort: 'default' };
         await chrome.storage.local.set({ settings: m });
@@ -561,6 +563,7 @@ const server = http.createServer((req, res) => {
         const { settings } = await chrome.storage.local.get('settings');
         const m = xccMergeSettings(settings);
         m.provider = 'custom';
+        m.activeCustomVendorId = 'primary';
         m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'm-a', models: ['m-a', 'm-b'] };
         await chrome.storage.local.set({ settings: m });
       });
@@ -586,8 +589,13 @@ const server = http.createServer((req, res) => {
         return settings.custom.model;
       });
       if (saved !== 'm-b') throw new Error('未落盘: ' + saved);
-      const label = await page.locator('.xcc-provider').innerText();
-      if (!label.includes('m-b')) throw new Error('provider 行未刷新: ' + label);
+      // v0.5.12：provider 文本行已由供应商下拉取代；UI 跟真 = 模型下拉刷新后仍为 m-b
+      await page.waitForFunction(() => {
+        const m = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-model');
+        return !!(m && m.value === 'm-b');
+      }, null, { timeout: 8000 });
+      const vend = await page.locator('.xcc-vendor').inputValue();
+      if (vend !== 'primary') throw new Error('供应商下拉异常: ' + vend);
       const before = mockLLM.count;
       await page.locator('.xcc-panel [data-act="regen"]').click();
       const t0 = Date.now();
@@ -598,6 +606,52 @@ const server = http.createServer((req, res) => {
       const body = JSON.parse(mockLLM.lastBody || '{}');
       if (body.model !== 'm-b') throw new Error('生成 model 未切换: ' + body.model);
       return body.model;
+    });
+
+    // v0.5.12 多供应商：面板供应商下拉切换档案 → 模型联动 + 生成走对应档案的 Key/模型
+    await step('面板供应商下拉：多档案切换即生效（模型联动 + 生成走对应档案）', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const m = xccMergeSettings(settings);
+        m.customVendors = [
+          { id: 'cv-smoke', kind: 'custom', name: '副驾中转', baseUrl: 'http://localhost:8787/v1',
+            apiKey: 'smoke-key-2', model: 's-1', models: ['s-1', 's-2'] }
+        ];
+        await chrome.storage.local.set({ settings: m });
+      });
+      await page.bringToFront();
+      await page.waitForTimeout(700); // storage.onChanged → refreshSettings
+      const names = await page.evaluate(() =>
+        [...document.querySelector('#xcc-host').shadowRoot.querySelectorAll('.xcc-vendor option')]
+          .map((o) => o.textContent)
+      );
+      if (!names.some((t) => t.includes('副驾中转'))) {
+        throw new Error('供应商下拉无新档案: ' + names.join(','));
+      }
+      await page.locator('.xcc-vendor').selectOption('cv-smoke');
+      await page.waitForFunction(() => {
+        const host = document.querySelector('#xcc-host').shadowRoot;
+        const m = host.querySelector('.xcc-model');
+        return !!(m && m.value === 's-1' && m.options.length === 2);
+      }, null, { timeout: 8000 });
+      const before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15000 && mockLLM.count < before + 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (mockLLM.count < before + 1) throw new Error('请求未到达');
+      if (mockLLM.lastAuth !== 'Bearer smoke-key-2') throw new Error('未走新档案 Key: ' + mockLLM.lastAuth);
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      if (body.model !== 's-1') throw new Error('未用新档案模型: ' + body.model);
+      // 切回主槽位 → 模型下拉回到 m-b（收尾恢复，供后续步骤）
+      await page.locator('.xcc-vendor').selectOption('primary');
+      await page.waitForFunction(() => {
+        const m = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-model');
+        return !!(m && m.value === 'm-b');
+      }, null, { timeout: 8000 });
+      return 'smoke-key-2 / ' + body.model;
     });
 
     await step('grok-oauth 面板候选：发现∪兜底∪当前值去重 + 已验证标注 + 不混入哨兵', async () => {
@@ -632,6 +686,7 @@ const server = http.createServer((req, res) => {
         const { settings } = await chrome.storage.local.get('settings');
         const m = xccMergeSettings(settings);
         m.provider = 'custom';
+        m.activeCustomVendorId = 'primary';
         m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'm-a', models: ['m-a', 'm-b'] };
         await chrome.storage.local.set({ settings: m });
       });
@@ -1048,6 +1103,7 @@ const server = http.createServer((req, res) => {
         const { settings } = await chrome.storage.local.get('settings');
         const m = xccMergeSettings(settings);
         m.provider = 'custom';
+        m.activeCustomVendorId = 'primary';
         m.custom = { baseUrl: 'http://localhost:8787/v1', apiKey: 'smoke-key', model: 'm-a', models: ['m-a', 'm-b'] };
         await chrome.storage.local.set({ settings: m });
       });
@@ -1098,6 +1154,51 @@ const server = http.createServer((req, res) => {
         async () => (await chrome.storage.local.get('settings')).settings.custom.models
       );
       if (models.length !== 1 || models[0] !== 'm-a') throw new Error('存储被误删: ' + JSON.stringify(models));
+    });
+
+    // v0.5.12 设置页供应商列表：新增即激活/表单绑定新档案、改名落盘、删除回落主槽位
+    await step('设置页供应商列表：新增/激活/改名/删除即时落盘', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.reload();
+      await optsPage.waitForTimeout(900);
+      const cnt = async () =>
+        optsPage.evaluate(async () => (await chrome.storage.local.get('settings')).settings.customVendors?.length ?? 0);
+      const n0 = await cnt();
+      const baseRows = await optsPage.locator('.vendor-row').count();
+      if (baseRows !== n0 + 3) throw new Error('初始行数异常: ' + baseRows + '/' + n0);
+      await optsPage.locator('#vendor-new-name').fill('冒烟中转2号');
+      await optsPage.locator('#vendor-add').click();
+      await optsPage.waitForTimeout(800);
+      if ((await optsPage.locator('.vendor-row').count()) !== baseRows + 1) throw new Error('新增后行数异常');
+      if (!(await optsPage.locator('#pane-custom').isVisible())) throw new Error('新增未激活自定义表单');
+      if ((await optsPage.locator('#custom-base').inputValue()) !== '') throw new Error('表单未绑定新档案');
+      const st = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const v = (settings.customVendors || []).find((x) => x.name === '冒烟中转2号');
+        return { has: !!v, provider: settings.provider, active: settings.activeCustomVendorId, vid: v && v.id };
+      });
+      if (!st.has || st.provider !== 'custom' || st.active !== st.vid) {
+        throw new Error('新增档案落盘异常: ' + JSON.stringify(st));
+      }
+      // 改名（fill + 显式 change，同目标字数输入的测试手法）
+      const row = optsPage.locator('.vendor-row[data-vendor="' + st.vid + '"]');
+      await row.locator('input.vendor-name').fill('冒烟中转3号');
+      await row.locator('input.vendor-name').dispatchEvent('change');
+      await optsPage.waitForTimeout(700);
+      const renamed = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return (settings.customVendors || []).some((x) => x.name === '冒烟中转3号');
+      });
+      if (!renamed) throw new Error('改名未落盘');
+      // 删除（confirm 全局 accept）→ 档案消失，active 回落主槽位
+      await row.locator('button').click();
+      await optsPage.waitForTimeout(800);
+      const after = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return (settings.customVendors || []).length + '/' + settings.activeCustomVendorId;
+      });
+      if (after !== n0 + '/primary') throw new Error('删除/回落异常: ' + after);
+      return after;
     });
 
     await step('旧数据迁移：无 custom.models 的单值进数组且面板同步', async () => {
@@ -1218,13 +1319,13 @@ const server = http.createServer((req, res) => {
       await optsPage.evaluate(() => healOrphanPage(true)); // 第一次：set 标记 + reload
       await optsPage.waitForLoadState('load');
       await optsPage.waitForTimeout(900);
-      if ((await optsPage.locator('.provider-item').count()) < 3) throw new Error('首次自愈后 UI 异常');
+      if ((await optsPage.locator('.vendor-row').count()) < 3) throw new Error('首次自愈后 UI 异常');
       const flag = await optsPage.evaluate(() => sessionStorage.getItem('xccHealTried'));
       if (flag) throw new Error('自愈成功后标记未清除'); // v0.4.0 在此失败
       await optsPage.evaluate(() => healOrphanPage(true)); // 第二次：应再次自愈而非死页
       await optsPage.waitForLoadState('load');
       await optsPage.waitForTimeout(900);
-      if ((await optsPage.locator('.provider-item').count()) < 3) throw new Error('第二次自愈失败');
+      if ((await optsPage.locator('.vendor-row').count()) < 3) throw new Error('第二次自愈失败');
       if ((await optsPage.title()).includes('页面已失效')) throw new Error('误入第二阶段');
     });
 

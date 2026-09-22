@@ -126,3 +126,14 @@ code {
   color: #ef4444; font-weight: 600; cursor: pointer;
 }
 #custom-proxy-help[open] > summary { color: #dc2626; }
+
+/* v0.5.12 供应商列表（多供应商）：radio 设为当前使用 + 改名 + 删除（内置条目不可删） */
+#vendor-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.vendor-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: 8px; }
+.vendor-row.active { border-color: var(--brand); background: #f5f4ff; }
+.vendor-row input[type="radio"] { width: auto; flex: 0 0 auto; }
+.vendor-row .vendor-kind { font-size: 11px; color: var(--muted); flex: 0 0 auto; white-space: nowrap; }
+.vendor-row .vendor-name { flex: 1; }
+.vendor-row .vendor-fixed { flex: 1; font-weight: 600; font-size: 13.5px; }
+.vendor-row.builtin .vendor-name { border: none; background: none; font-weight: 600; padding-left: 0; }

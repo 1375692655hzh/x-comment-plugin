@@ -107,8 +107,6 @@
       font-size: 12.5px; font-weight: 600; padding: 4px 12px; border-radius: 999px;
     }
     button.xcc-set:hover { filter: brightness(1.15); color: #fff; }
-    .xcc-provider { font-size: 11px; color: #9ca3af; }
-    .xcc-provider.warn { color: #f59e0b; }
     .xcc-update {
       font-size: 11.5px; color: #fbbf24; cursor: pointer;
       padding: 4px 8px; border-radius: 7px;
@@ -210,10 +208,11 @@
         <button class="xcc-mini" data-act="close" title="收起面板">✕</button>
       </span>
     </div>
-    <div class="xcc-provider">加载中…</div>
-    <div class="xcc-update" hidden>🆕 有新版</div>
+    <label class="xcc-lb">供应商</label>
+    <select class="xcc-vendor" title="当前供应商，切换即生效；新增供应商与配置请到设置页"></select>
     <label class="xcc-lb">模型</label>
-    <select class="xcc-model" title="当前接入方式的可用模型，切换即生效；完整列表与自定义 ID 请到设置页"></select>
+    <select class="xcc-model" title="当前供应商的可用模型，切换即生效；完整列表与自定义 ID 请到设置页"></select>
+    <div class="xcc-update" hidden>🆕 有新版</div>
     <label class="xcc-lb">人设</label>
     <select class="xcc-persona"></select>
     <label class="xcc-lb">生成风格</label>
@@ -257,9 +256,9 @@
     launcher: shadow.querySelector('.xcc-launcher'),
     hoverBtn: shadow.querySelector('.xcc-hover-btn'),
     panel: shadow.querySelector('.xcc-panel'),
-    provider: shadow.querySelector('.xcc-provider'),
     update: shadow.querySelector('.xcc-update'),
     modelSel: shadow.querySelector('.xcc-model'),
+    vendorSel: shadow.querySelector('.xcc-vendor'),
     personaSel: shadow.querySelector('.xcc-persona'),
     genSel: shadow.querySelector('.xcc-gen'),
     stanceBtns: shadow.querySelectorAll('.xcc-stance-btn'),
@@ -372,6 +371,26 @@
     els.launcher.classList.toggle('left', (state.settings && state.settings.panelSide) === 'left');
   }
 
+  // 供应商下拉（v0.5.12）：选项=vendorList（未配置的标后缀），选中=activeVendorId
+  function renderVendors() {
+    const pub = state.settings;
+    if (!pub || !els.vendorSel) return;
+    const sel = els.vendorSel;
+    const list = pub.vendorList || [];
+    sel.textContent = '';
+    for (const v of list) {
+      const o = document.createElement('option');
+      o.value = v.id;
+      o.textContent = v.name + (v.ready ? '' : '（未配置）');
+      sel.appendChild(o);
+    }
+    sel.value = list.some((x) => x.id === pub.activeVendorId)
+      ? pub.activeVendorId
+      : list[0]
+        ? list[0].id
+        : '';
+  }
+
   // 模型下拉（v0.5.3）：按接入方式渲染候选；grok 授权通道复用「已验证/未验证」标注。
   // 与 fillSelect 不同：不做 prev 保留——显示值必须严格等于 pub.model（= GENERATE 实际
   // 使用的模型），远端（设置页）改模型后本面板立即跟真，杜绝"显示 A 实际生成用 B"
@@ -398,10 +417,8 @@
     els.panel.classList.toggle('left', pub.panelSide === 'left');
     fillSelect(els.personaSel, pub.personaPresets, pub.activePersonaId);
     fillSelect(els.genSel, pub.genPresets, pub.activeGenId);
+    renderVendors();
     renderModels();
-    const ok = pub.ready && pub.ready[pub.provider];
-    els.provider.textContent = pub.providerLabel + (ok ? '' : ' · 未配置，点 ⚙ 去设置');
-    els.provider.classList.toggle('warn', !ok);
     // 同设置页：现场用已装版本重算，不用存储里的旧结论
     const upd = pub.update;
     const installed = chrome.runtime.getManifest().version;
@@ -430,14 +447,12 @@
     } catch (e) {
       if (!(chrome.runtime && chrome.runtime.id)) {
         // 本内容脚本属于重载前的旧实例：storage 已不可用，停止重试
-        els.provider.textContent = '⚠ 扩展已重新加载，请刷新本页（F5）后继续使用';
-        els.provider.classList.add('warn');
+        setStatus('⚠ 扩展已重新加载，请刷新本页（F5）后继续使用', true);
         syncGenBtn();
         return;
       }
       if (!state.settings) {
-        els.provider.textContent = '⚠ 设置读取失败：请在扩展管理页点「重新加载」后刷新页面';
-        els.provider.classList.add('warn');
+        setStatus('⚠ 设置读取失败：请在扩展管理页点「重新加载」后刷新页面', true);
         setTimeout(refreshSettings, 5000);
       }
     }
@@ -1076,23 +1091,43 @@
     }).catch(() => {});
   });
 
-  // 模型切换（v0.5.3）：写当前接入方式对应的 model 字段；SW 每次 GENERATE 都重读
-  // settings，落盘即生效。本地即时刷新 provider 行，不等 storage 往返。
+  // 供应商切换（v0.5.12）：写 provider/activeCustomVendorId，刷新公共视图后模型下拉联动。
+  // SW 每次 GENERATE 都重读 settings，落盘即生效
+  els.vendorSel.addEventListener('change', () => {
+    const v = els.vendorSel.value;
+    if (!v) return;
+    mutateSettings((m) => {
+      if (v === 'xai' || v === 'grok-oauth') m.provider = v;
+      else {
+        m.provider = 'custom';
+        m.activeCustomVendorId = v === 'primary' ? 'primary' : v;
+      }
+    })
+      .then(() => refreshSettings())
+      .catch(() => {});
+  });
+
+  // 模型切换（v0.5.3）：写当前供应商对应的 model 字段；SW 每次 GENERATE 都重读
+  // settings，落盘即生效。
   els.modelSel.addEventListener('change', () => {
     const v = els.modelSel.value;
     if (!v) return;
-    if (state.settings) {
-      state.settings.model = v;
-      const prefix = String(state.settings.providerLabel || '').split(' · ')[0];
-      state.settings.providerLabel = prefix + ' · ' + v;
-      const ok = state.settings.ready && state.settings.ready[state.settings.provider];
-      els.provider.textContent = state.settings.providerLabel + (ok ? '' : ' · 未配置，点 ⚙ 去设置');
-    }
+    if (state.settings) state.settings.model = v;
     mutateSettings((m) => {
       if (m.provider === 'xai') m.xai.model = v;
       else if (m.provider === 'custom') {
-        if (!m.custom.models.includes(v)) m.custom.models.push(v); // 防御：候选必含 active
-        m.custom.model = v;
+        // v0.5.12：写当前活动的自定义档案（主槽位或额外供应商）
+        const c =
+          m.activeCustomVendorId && m.activeCustomVendorId !== 'primary'
+            ? (m.customVendors || []).find((x) => x.id === m.activeCustomVendorId)
+            : null;
+        if (c) {
+          if (!c.models.includes(v)) c.models.push(v); // 防御：候选必含 active
+          c.model = v;
+        } else {
+          if (!m.custom.models.includes(v)) m.custom.models.push(v);
+          m.custom.model = v;
+        }
       } else m.grokOAuth.model = v;
     }).catch(() => {});
   });

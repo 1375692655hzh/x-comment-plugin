@@ -68,7 +68,7 @@ function toast(msg, isErr) {
   toast._t = setTimeout(() => (t.className = 'toast'), 2600);
 }
 
-// ---------- 模型接入 ----------
+// ---------- 模型接入（v0.5.12 多供应商） ----------
 
 function togglePanes() {
   $('pane-xai').hidden = SETTINGS.provider !== 'xai';
@@ -76,34 +76,161 @@ function togglePanes() {
   $('pane-oauth').hidden = SETTINGS.provider !== 'grok-oauth';
 }
 
-function initProviderUI() {
-  document.querySelectorAll('input[name=provider]').forEach((r) => {
-    r.checked = r.value === SETTINGS.provider;
-    r.closest('.provider-item').classList.toggle('checked', r.checked);
-    r.addEventListener('change', async () => {
-      if (!r.checked) return;
-      const value = r.value;
-      await saveMutate((m) => {
-        m.provider = value;
-      });
-      document.querySelectorAll('.provider-item').forEach((it) =>
-        it.classList.toggle('checked', it.contains(r))
-      );
-      togglePanes();
-      toast('已切换接入方式：' + value);
-    });
+// 当前面板选中的供应商标识：'xai' | 'grok-oauth' | 'primary'（主槽位）| 额外档案 id
+function activeVendorKey() {
+  if (SETTINGS.provider === 'xai') return 'xai';
+  if (SETTINGS.provider !== 'custom') return 'grok-oauth';
+  return SETTINGS.activeCustomVendorId === 'primary' ? 'primary' : SETTINGS.activeCustomVendorId;
+}
+
+async function activateVendor(key) {
+  await saveMutate((m) => {
+    if (key === 'xai' || key === 'grok-oauth') {
+      m.provider = key;
+    } else {
+      m.provider = 'custom';
+      m.activeCustomVendorId = key === 'primary' ? 'primary' : key;
+    }
+  });
+  renderVendorRows();
+  fillProviderForms();
+  renderOAuthStatus();
+  toast('已切换供应商');
+}
+
+// 供应商列表行：radio=设为当前使用；自定义类可改名；额外档案可删除（主槽位承载旧数据不可删）
+function vendorRow(key, name, kindLabel, builtin) {
+  const row = document.createElement('div');
+  row.className = 'vendor-row' + (builtin ? ' builtin' : '') + (activeVendorKey() === key ? ' active' : '');
+  row.dataset.vendor = key; // 供测试精确定位
+
+  const radio = document.createElement('input');
+  radio.type = 'radio';
+  radio.name = 'vendor-active';
+  radio.checked = activeVendorKey() === key;
+  radio.title = '设为当前使用（面板顶部同步）';
+  radio.addEventListener('change', async () => {
+    if (radio.checked) await activateVendor(key);
   });
 
+  const kind = document.createElement('span');
+  kind.className = 'vendor-kind';
+  kind.textContent = kindLabel;
+
+  let nameEl;
+  if (key === 'primary' || !builtin) {
+    nameEl = document.createElement('input');
+    nameEl.className = 'vendor-name';
+    nameEl.value = name;
+    nameEl.placeholder = '供应商名称';
+    nameEl.title = builtin ? '首个自定义接口（可改名，不可删除）' : '供应商名称';
+    nameEl.addEventListener('change', async () => {
+      const v = nameEl.value.trim();
+      if (!v) {
+        nameEl.value = name;
+        return;
+      }
+      await saveMutate((m) => {
+        if (key === 'primary') m.custom.name = v;
+        else {
+          const t = (m.customVendors || []).find((x) => x.id === key);
+          if (t) t.name = v;
+        }
+      });
+      renderVendorRows();
+      toast('供应商已改名：' + v);
+    });
+  } else {
+    nameEl = document.createElement('span');
+    nameEl.className = 'vendor-fixed';
+    nameEl.textContent = name;
+  }
+
+  row.append(radio, kind, nameEl);
+
+  if (!builtin) {
+    const del = mkBtn('删除', 'small danger');
+    del.addEventListener('click', async () => {
+      if (!confirm('删除供应商「' + name + '」？接口地址与 Key 一并删除。')) return;
+      await saveMutate((m) => {
+        m.customVendors = (m.customVendors || []).filter((x) => x.id !== key);
+        if (m.activeCustomVendorId === key) m.activeCustomVendorId = 'primary'; // 主槽位顶上
+      });
+      renderVendorRows();
+      fillProviderForms();
+      toast('已删除供应商');
+    });
+    row.append(del);
+  }
+  return row;
+}
+
+function renderVendorRows() {
+  const box = $('vendor-list');
+  box.textContent = '';
+  box.appendChild(vendorRow('xai', 'xAI API', 'xAI Key', true));
+  box.appendChild(vendorRow('primary', SETTINGS.custom.name || '自定义接口', 'OpenAI 兼容', true));
+  box.appendChild(vendorRow('grok-oauth', 'Grok 授权', '订阅额度', true));
+  for (const v of SETTINGS.customVendors || []) {
+    box.appendChild(vendorRow(v.id, v.name, 'OpenAI 兼容', false));
+  }
+}
+
+// 三块表单按当前生效的供应商回填（custom 表单绑定活动自定义档案：主槽位或额外档案）
+function fillProviderForms() {
   $('xai-key').value = SETTINGS.xai.apiKey;
   $('xai-model').value = SETTINGS.xai.model;
-  $('custom-base').value = SETTINGS.custom.baseUrl;
-  $('custom-key').value = SETTINGS.custom.apiKey;
+  const acc = xccActiveCustom(SETTINGS);
+  $('custom-base').value = acc.baseUrl;
+  $('custom-key').value = acc.apiKey;
   renderCustomModels();
   fillOAuthInputs();
   togglePanes();
+}
+
+// 对"当前活动的自定义档案"做变更写回（主槽位或额外档案），模型列表/保存共用
+function mutateActiveCustom(fn) {
+  return saveMutate((m) => {
+    if (m.activeCustomVendorId && m.activeCustomVendorId !== 'primary') {
+      const v = (m.customVendors || []).find((x) => x.id === m.activeCustomVendorId);
+      if (v) {
+        fn(v);
+        return;
+      }
+    }
+    fn(m.custom);
+  });
+}
+
+async function addVendor() {
+  const input = $('vendor-new-name');
+  const name = input.value.trim() || '新供应商';
+  const id = xccUid('cv');
+  await saveMutate((m) => {
+    m.customVendors = [
+      ...(m.customVendors || []),
+      { id, kind: 'custom', name, baseUrl: '', apiKey: '', model: 'gpt-4o-mini', models: ['gpt-4o-mini'] }
+    ];
+    m.provider = 'custom';
+    m.activeCustomVendorId = id;
+  });
+  input.value = '';
+  renderVendorRows();
+  fillProviderForms();
+  $('custom-base').focus();
+  toast('已新增供应商「' + name + '」，请填写接口地址与 Key');
+}
+
+function initProviderUI() {
+  renderVendorRows();
+  fillProviderForms();
   renderOAuthStatus();
   discoverGrokModels().catch(() => {}); // 已授权则拉一次模型目录
 
+  $('vendor-add').addEventListener('click', addVendor);
+  $('vendor-new-name').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addVendor();
+  });
   $('xai-save').addEventListener('click', () => saveProvider('xai'));
   $('custom-save').addEventListener('click', () => saveProvider('custom'));
   $('custom-model-add').addEventListener('click', addCustomModel);
@@ -206,13 +333,23 @@ async function saveProvider(kind) {
     // 权限申请要在按钮手势内最先做（自定义域名不在 manifest 静态授权里）
     const granted = await requestOrigin(baseUrl);
     if (!granted) statusEl.textContent = '⚠ 未授予网络权限，调用可能被浏览器拦截';
+    // 写入"当前活动的自定义档案"（主槽位或额外供应商）；model/models 由列表控件即时管理
+    const accId = xccActiveCustom(SETTINGS).id;
     await saveMutate((m) => {
-      // 合并写：model/models 由模型列表控件即时管理，此处只动连接字段
-      m.custom = {
-        ...m.custom,
-        baseUrl,
-        apiKey: $('custom-key').value.trim()
-      };
+      const target =
+        accId !== 'primary'
+          ? (m.customVendors || []).find((x) => x.id === accId)
+          : null;
+      if (target) {
+        target.baseUrl = baseUrl;
+        target.apiKey = $('custom-key').value.trim();
+      } else {
+        m.custom = {
+          ...m.custom,
+          baseUrl,
+          apiKey: $('custom-key').value.trim()
+        };
+      }
     });
   }
   statusEl.textContent = '测试中…';
@@ -260,28 +397,31 @@ async function saveProvider(kind) {
   }
 }
 
-// ---------- 自定义接口：模型列表（v0.5.3 多模型，增/删/改名/切换 active 全部即时落盘） ----------
+// ---------- 自定义接口：模型列表（v0.5.3 多模型；v0.5.12 起绑定活动供应商档案） ----------
+// 增/删/改名/切换 active 全部即时落盘，写回走 mutateActiveCustom
 
 function renderCustomModels() {
   const box = $('custom-models');
   box.textContent = '';
-  for (const id of SETTINGS.custom.models) box.appendChild(customModelRow(id));
+  const acc = xccActiveCustom(SETTINGS);
+  for (const id of acc.models) box.appendChild(customModelRow(id));
 }
 
 function customModelRow(id) {
+  const acc = xccActiveCustom(SETTINGS);
   const row = document.createElement('div');
-  row.className = 'model-row' + (id === SETTINGS.custom.model ? ' active' : '');
+  row.className = 'model-row' + (id === acc.model ? ' active' : '');
   row.dataset.model = id; // 供测试与精确定位（input 的 value 不体现在 innerText）
 
   const radio = document.createElement('input');
   radio.type = 'radio';
   radio.name = 'custom-active-model';
-  radio.checked = id === SETTINGS.custom.model;
+  radio.checked = id === acc.model;
   radio.title = '设为当前使用（面板顶部下拉同步）';
   radio.addEventListener('change', async () => {
     if (!radio.checked) return;
-    await saveMutate((m) => {
-      m.custom.model = id;
+    await mutateActiveCustom((c) => {
+      c.model = id;
     });
     renderCustomModels();
     toast('当前模型：' + id);
@@ -297,33 +437,31 @@ function customModelRow(id) {
       input.value = id; // 空输入还原
       return;
     }
-    if (SETTINGS.custom.models.includes(v)) {
+    if (acc.models.includes(v)) {
       toast('模型 ' + v + ' 已存在，未保存', true);
       input.value = id;
       return;
     }
-    await saveMutate((m) => {
-      const i = m.custom.models.indexOf(id);
-      if (i >= 0) m.custom.models[i] = v;
-      if (m.custom.model === id) m.custom.model = v; // 改的是当前使用行则同步 active
+    await mutateActiveCustom((c) => {
+      const i = c.models.indexOf(id);
+      if (i >= 0) c.models[i] = v;
+      if (c.model === id) c.model = v; // 改的是当前使用行则同步 active
     });
-    await loadSettings();
     renderCustomModels();
     toast('模型已改为 ' + v);
   });
 
   const del = mkBtn('删除', 'small danger');
   del.addEventListener('click', async () => {
-    if (SETTINGS.custom.models.length <= 1) {
+    if (acc.models.length <= 1) {
       toast('至少保留一个模型', true);
       return;
     }
     if (!confirm('删除模型「' + id + '」？')) return;
-    await saveMutate((m) => {
-      m.custom.models = m.custom.models.filter((x) => x !== id);
-      if (m.custom.model === id) m.custom.model = m.custom.models[0]; // 删的是 active：顺延首个
+    await mutateActiveCustom((c) => {
+      c.models = c.models.filter((x) => x !== id);
+      if (c.model === id) c.model = c.models[0]; // 删的是 active：顺延首个
     });
-    await loadSettings();
     renderCustomModels();
     toast('已删除');
   });
@@ -339,14 +477,13 @@ async function addCustomModel() {
     toast('模型 ID 不能为空', true);
     return;
   }
-  if (SETTINGS.custom.models.includes(v)) {
+  if (xccActiveCustom(SETTINGS).models.includes(v)) {
     toast('模型 ' + v + ' 已存在', true);
     return;
   }
-  await saveMutate((m) => {
-    m.custom.models.push(v); // 不动 active：当前使用保持不变
+  await mutateActiveCustom((c) => {
+    c.models.push(v); // 不动 active：当前使用保持不变
   });
-  await loadSettings();
   renderCustomModels();
   input.value = '';
   toast('已添加模型 ' + v);

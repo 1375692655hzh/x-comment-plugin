@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "X 评论副驾 (X Comment Copilot)",
-  "version": "0.5.11",
+  "version": "0.5.12",
   "description": "在 X/Twitter 上识别推文，用自定义「人设 + 生成」提示词一键生成高质量回复。支持 xAI API Key、任意 OpenAI 兼容接口或 Grok 账号授权。",
   "permissions": ["storage"],
   "host_permissions": [
