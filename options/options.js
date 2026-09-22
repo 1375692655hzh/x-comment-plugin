@@ -226,7 +226,26 @@ async function saveProvider(kind) {
     statusEl.textContent = '✓ 连通正常';
     toast('已保存，接口连通');
   } catch (e) {
-    const msg = e && e.message ? e.message : String(e);
+    let msg = e && e.message ? e.message : String(e);
+    // Failed to fetch 只有两大来源，用 permissions.contains 把猜测变成机器判断：
+    // ① 域名权限未授予（fetch 被浏览器直接拦截）② 浏览器到该域名网络不通
+    if (/Failed to fetch|NetworkError|网络请求失败/i.test(msg)) {
+      let origin = '';
+      try {
+        origin =
+          kind === 'xai' ? 'https://api.x.ai' : new URL($('custom-base').value.trim()).origin;
+      } catch (e2) {
+        /* 地址非法则跳过诊断 */
+      }
+      if (origin) {
+        const hasPerm = await new Promise((res) =>
+          chrome.permissions.contains({ origins: [origin + '/*'] }, (g) => res(!!g))
+        );
+        msg += hasPerm
+          ? `（${origin} 权限已授予——是网络不通：请在地址栏直接打开该地址验证能否访问）`
+          : `（${origin} 权限未授予——请再点一次「保存并测试」，弹窗中点「允许」）`;
+      }
+    }
     statusEl.textContent = '✗ ' + msg;
     toast('已保存，但测试失败：' + msg, true);
   }
