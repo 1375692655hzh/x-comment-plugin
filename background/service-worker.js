@@ -103,7 +103,8 @@ function buildHumanizeMessages(s, text) {
     '- 打破工整：不用三项排比、不用整齐对仗，长短句随意交错，能短则短\n' +
     '- 说人话：不用"深入、格局、赋能、无疑、彰显、令人"这类 AI 高频词，换最平实的说法\n' +
     '- 像打字不像写作：可以有口语、省略、轻微的语气和情绪，别堆 emoji，不用 markdown\n' +
-    '- 具体优先：抽象概括换成具体细节；没有可换的就保持原样，绝不编造新事实';
+    '- 具体优先：抽象概括换成具体细节；没有可换的就保持原样，绝不编造新事实\n' +
+    '- 原评论开头的固定前缀（如「省流：」）必须原样保留——那是风格标记，不是正文';
   if (s.genParams.language === 'zh') sys += '\n\n保持中文。';
   else if (s.genParams.language === 'en') sys += '\n\nKeep it in English.';
   else sys += '\n\n保持原评论的语言不变。';

@@ -71,37 +71,39 @@ const XCC_DEFAULTS = {
   ],
 
   // 生成提示词：定义"怎么写"。占位符：{tweet_text} {author} {topic}
-  // v0.5.11 五件套：认同+补充观点 / 犀利提问 / 幽默玩梗 / 省流党 / 深度分析
+  // v0.5.14 五件套文案升级：五引擎（K3/Grok4.7/GPT-6-Astra/Gemini-3.8）同题评审综合版。
+  // 设计原则（评审共识）：风格层只管内容策略（选角度/给什么料/怎么收尾），文风戒律归人设层
+  // 与去AI味层；每条带兜底分支防硬造；负向禁令配正向替代动作。
   genPresets: [
     {
       id: 'g-agree',
       name: '认同 + 补充观点',
       prompt:
-        '针对下面这条推文写一条回复：先简洁点出你认同的地方，再补充一个具体的新视角、数据或亲身经历。口语化，不超过 280 字符，最多 1 个 emoji，不要以"同意"开头。\n\n推文作者：{author}\n推文内容：\n{tweet_text}'
+        '回复这条推文：用自己的话点出一个你认同的具体点（别复述原句，也别用"说得好""深有同感"开头），再补一层对方没说的：一个新视角、实际影响或适用边界，让人接得上话。没有值得认同的点就中性接话，不硬夸；没经历过的别编。像顺手回帖。总长不超过 280 字符，最多 1 个 emoji。\n\n推文作者：{author}\n推文内容：\n{tweet_text}'
     },
     {
       id: 'g-question',
       name: '犀利提问',
       prompt:
-        '针对这条推文提出一个有深度、能引发讨论的回复式问题，直击其论证的薄弱点或没有提到的关键变量。语气好奇而非挑衅，不超过 200 字符。\n\n推文内容：\n{tweet_text}'
+        '只问一个具体、答得上来的问题：戳论证里最影响结论的缺口——缺的数据、没验证的假设或没覆盖的边界。要求：用半句自己的话点出卡在哪（别复述原推、别夹推文没有的事实），语气好奇较真、就事论事，不用"难道/为什么不"式反问，不预设对方错了；推文是经历或感受就追问细节，别让人自证。不超过 200 字符。\n\n推文内容：\n{tweet_text}'
     },
     {
       id: 'g-humor',
       name: '幽默玩梗',
       prompt:
-        '用轻松幽默的方式回复这条推文，可以适度玩梗或善意反讽，但要友好、不冒犯、不阴阳怪气，不超过 160 字符。\n\n推文内容：\n{tweet_text}'
+        '用一句轻松的话回复这条推文：从内容里找反差或槽点，顺着推到荒谬一步，或抖个贴着这条推文的包袱、接地气的类比。要求：梗从这条推文长出来，不硬蹭热梗，也不解释笑点；笑点对准事，不对准人，不堆 emoji 和"哈哈哈"；没笑点就走机智观察，宁平淡不尬梗；遇到悲痛或求助的帖子就收起玩笑。不超过 160 字符。\n\n推文内容：\n{tweet_text}'
     },
     {
       id: 'g-tldr',
       name: '省流党',
       prompt:
-        '像省流党一样回复这条推文：先以"省流："开头，一句话总结它的核心（或戳破它没说的前提），再跟一句你自己的短评。全文不超过 120 字符，口语化。\n\n推文内容：\n{tweet_text}'
+        '以"省流："开头，一句话把这条推文压成更准的说法：它真正的结论，或它没说出口的前提。要求：一针见血、大白话，不替作者编动机；有标题党或贩卖焦虑的嫌疑就客观点破，没有就老实总结不硬挑刺；原帖本身很短就直接提炼重点，不复读。最后跟一句你的态度短评，只一句。全文不超过 120 字符。\n\n推文内容：\n{tweet_text}'
     },
     {
       id: 'g-deep',
       name: '深度分析',
       prompt:
-        '回复这条推文并做深度分析：点出容易被忽略的关键变量、逻辑漏洞或背景信息，给出一到两个具体依据（数据、案例或亲身经历）。保持评论体、别写成长文，不超过 280 字符，不端着、不用学术腔。\n\n推文内容：\n{tweet_text}'
+        '回复这条推文，只抓一个别人容易漏掉的点：关键变量、逻辑断点或适用条件，讲清它怎么改变结论，收尾给出你的判断（不必提问）。要求：评论体，两三句写完，不写成小作文、不用学术腔；依据只写推文里有的或不用查也成立的常识，拿不准就删掉依据改说推测，不编数字案例和经历。不超过 280 字符。\n\n推文内容：\n{tweet_text}'
     }
   ],
 
@@ -133,7 +135,10 @@ const XCC_DEFAULTS = {
   panelSide: 'right',
 
   // 预设结构版本标记（v0.5.11）：旧数据没有此标记 → xccMergeSettings 执行一次预设收敛迁移
-  presetsV2: true
+  presetsV2: true,
+  // 风格文案版本标记（v0.5.14）：旧数据没有此标记 → 内置五件套 prompt 按新文案升级
+  // （用户自定义预设 id 不在内置集合内的原样保留，人设预设不动）
+  presetsV3: true
 };
 
 // 把 chrome.storage.local 中保存的 settings 合并到默认值上（兼容旧版本缺字段）
@@ -209,6 +214,12 @@ function xccMergeSettings(saved) {
     genPresets = XCC_DEFAULTS.genPresets;
     if (genParams.maxTokens === 400) genParams.maxTokens = 1000;
     if (!genParams.language || genParams.language === 'auto') genParams.language = 'zh';
+  } else if (!s.presetsV3) {
+    // v0.5.14：内置五件套文案升级（五引擎评审综合版）。只按 id 替换内置条目，
+    // 用户自己新增的风格预设（id 不在内置集合）原样保留——不同于 v0.5.11 的整体收敛。
+    const builtinIds = new Set(XCC_DEFAULTS.genPresets.map((g) => g.id));
+    const extras = genPresets.filter((g) => g && g.id && !builtinIds.has(g.id));
+    genPresets = [...XCC_DEFAULTS.genPresets, ...extras];
   }
   // active 指向已删除的预设时收敛到首个（防下拉空选中/GENERATE 走错预设）
   if (!personaPresets.some((p) => p.id === activePersonaId)) {
@@ -228,7 +239,8 @@ function xccMergeSettings(saved) {
     genPresets,
     activePersonaId,
     activeGenId,
-    presetsV2: true
+    presetsV2: true,
+    presetsV3: true
   };
 }
 

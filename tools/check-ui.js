@@ -150,6 +150,14 @@ check(oh.includes('id="vendor-list"') && oh.includes('id="vendor-add"'), '设置
 check(oj.includes('function mutateActiveCustom') && oj.includes('activeCustomVendorId'), '设置页写回走活动档案');
 check(content.includes('xcc-vendor') && content.includes('function renderVendors'), '面板存在供应商下拉与渲染函数');
 check(sw.includes('xccResolveProviderCfg'), 'GENERATE 经供应商解析取配置');
+
+// 5.12 v0.5.14 门禁：五件套文案升级（五引擎评审）+ presetsV3 按 id 替换 + 省流锚点保留
+check(common.includes('presetsV3'), '存在 presetsV3 文案版本迁移标记');
+check(common.includes('builtinIds'), 'presetsV3 迁移按 id 替换（用户自定义预设保留）');
+check(common.includes('别复述原句'), '认同条防复述原话（评审共识）');
+check(common.includes('不替作者编动机'), '省流条收敛攻击性（不编动机/不硬挑刺）');
+check(common.includes('收尾给出你的判断'), '深度分析收尾给判断（与犀利提问区分）');
+check(sw.includes('省流：」）必须原样保留'), '人味改写保留风格锚点前缀（防洗掉"省流："）');
 }
 
 // 6. manifest 引用的文件都存在

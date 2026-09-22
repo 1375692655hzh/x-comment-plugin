@@ -771,6 +771,7 @@ const server = http.createServer((req, res) => {
       const usr = String((body.messages || [])[1] && body.messages[1].content);
       if (!sys.includes('人味改写器')) throw new Error('二段请求 system 非人味改写: ' + sys.slice(0, 40));
       if (!sys.includes('280')) throw new Error('免费模式改写段未带 280 硬约束');
+      if (!sys.includes('省流')) throw new Error('改写段未保留「省流：」风格锚点');
       if (!usr.includes('SMOKE-GEN 固定回复')) throw new Error('二段请求未携带第一段结果: ' + usr.slice(0, 40));
       const out = await page.locator('.xcc-out').inputValue();
       if (!out.includes('SMOKE-HUMANIZED')) throw new Error('输出框非改写结果: ' + out.slice(0, 40));
@@ -1259,7 +1260,31 @@ const server = http.createServer((req, res) => {
       if (r.ids !== 'p-general/g-agree') throw new Error('active 未重置到新预设: ' + r.ids);
       if (r.gp !== '1000/zh/true') throw new Error('默认参数未升级: ' + r.gp);
       if (r.keep !== '2000/en') throw new Error('自定义参数被覆盖: ' + r.keep);
-      return r.n + ' / ' + r.gp;
+      // v0.5.14 presetsV3：v0.5.11 形态数据（presetsV2 有、presetsV3 无）→ 内置五件
+      // prompt 按新文案升级，用户自定义预设保留（纯 merge 校验，不写盘）
+      const r3 = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        const old = JSON.parse(JSON.stringify(settings));
+        delete old.presetsV3; // 模拟 v0.5.11~0.5.13 的存量数据
+        old.genPresets = [
+          ...old.genPresets,
+          { id: 'g-mine', name: '我的自定义风格', prompt: '我的独有指令 {tweet_text}' }
+        ];
+        const m = xccMergeSettings(old);
+        const agree = m.genPresets.find((g) => g.id === 'g-agree');
+        const mine = m.genPresets.find((g) => g.id === 'g-mine');
+        return {
+          n: m.genPresets.length,
+          upgraded: !!(agree && agree.prompt.includes('别复述原句')),
+          mine: mine ? mine.prompt : '',
+          v3: m.presetsV3
+        };
+      });
+      if (r3.n !== 6) throw new Error('presetsV3 后预设数异常: ' + r3.n);
+      if (!r3.upgraded) throw new Error('内置五件未升级到 v0.5.14 文案');
+      if (!r3.mine.includes('我的独有指令')) throw new Error('用户自定义预设被误删: ' + r3.mine);
+      if (r3.v3 !== true) throw new Error('presetsV3 标记未置位');
+      return r.n + ' / ' + r.gp + ' / v3=' + r3.n;
     });
 
     // v0.5.0 面板左右切换（storage.onChanged → applySettings → .left 类）；v0.5.1 默认右侧
