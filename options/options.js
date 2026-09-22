@@ -316,6 +316,10 @@ async function requestOrigin(url) {
 
 async function saveProvider(kind) {
   const statusEl = $(kind + '-status');
+  // 连通测试必须测"刚保存的这份配置"（表单值），不能用 xccResolveProviderCfg(SETTINGS)
+  // 解析"当前活动供应商"——设置页打开期间面板侧可能已把供应商切走（v0.5.13 修复：
+  // 否则保存 A 档案、测的却是 B 档案旧配置，结果误导）
+  let testCfg;
   if (kind === 'xai') {
     const xai = {
       apiKey: $('xai-key').value.trim(),
@@ -324,6 +328,7 @@ async function saveProvider(kind) {
     await saveMutate((m) => {
       m.xai = xai;
     });
+    testCfg = { baseUrl: 'https://api.x.ai/v1', apiKey: xai.apiKey, model: xai.model };
   } else {
     const baseUrl = $('custom-base').value.trim();
     if (!baseUrl) {
@@ -333,7 +338,8 @@ async function saveProvider(kind) {
     // 权限申请要在按钮手势内最先做（自定义域名不在 manifest 静态授权里）
     const granted = await requestOrigin(baseUrl);
     if (!granted) statusEl.textContent = '⚠ 未授予网络权限，调用可能被浏览器拦截';
-    // 写入"当前活动的自定义档案"（主槽位或额外供应商）；model/models 由列表控件即时管理
+    const apiKey = $('custom-key').value.trim();
+    // 表单绑定的档案（与页面显示一致；写回同一定位）
     const accId = xccActiveCustom(SETTINGS).id;
     await saveMutate((m) => {
       const target =
@@ -342,21 +348,26 @@ async function saveProvider(kind) {
           : null;
       if (target) {
         target.baseUrl = baseUrl;
-        target.apiKey = $('custom-key').value.trim();
+        target.apiKey = apiKey;
       } else {
         m.custom = {
           ...m.custom,
           baseUrl,
-          apiKey: $('custom-key').value.trim()
+          apiKey
         };
       }
     });
+    // model 由模型列表控件管理，不在本表单：取该档案写回后的最新值
+    const savedAcc =
+      accId !== 'primary'
+        ? (SETTINGS.customVendors || []).find((x) => x.id === accId) || { model: '' }
+        : SETTINGS.custom;
+    testCfg = { baseUrl, apiKey, model: savedAcc.model };
   }
   statusEl.textContent = '测试中…';
   try {
-    const cfg = await xccResolveProviderCfg(SETTINGS); // 本页直连，不依赖后台
     await xccChatCompletion(
-      cfg,
+      testCfg,
       [{ role: 'user', content: '这是一条连通性测试，请只回复：pong' }],
       { temperature: 0, maxTokens: 10 }
     );
