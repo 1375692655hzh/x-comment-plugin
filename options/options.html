@@ -157,6 +157,21 @@
       <span class="hint" id="params-status"></span></div>
   </section>
 
+  <!-- ========== 配置备份（v0.5.16） ========== -->
+  <section class="card">
+    <h2>配置备份（导出 / 导入）</h2>
+    <p class="hint">升级换新版、换电脑、给朋友的浏览器配同款时：先在旧版本导出一份，装好新版后导入即恢复全部配置
+      （供应商与 Key、模型列表、提示词预设、生成参数、Grok 授权）。</p>
+    <div class="row">
+      <button class="primary" id="config-export">导出配置文件</button>
+      <button id="config-import-btn">导入配置文件</button>
+      <input type="file" id="config-import" accept=".json,application/json" hidden>
+      <span class="hint" id="backup-status"></span>
+    </div>
+    <p class="hint">⚠ 导出文件包含 API Key 与授权令牌（明文 JSON），只自己保存、别公开转发；
+      导入会整体覆盖当前配置。</p>
+  </section>
+
   <p class="foot">所有配置仅保存在本地（chrome.storage.local），API Key 不上传任何第三方服务器。设置页的网络请求（授权/测试/更新检查）由本页直达服务商，生成由扩展后台直达——全程无中间层。</p>
 </main>
 

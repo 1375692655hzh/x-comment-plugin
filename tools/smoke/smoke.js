@@ -1312,6 +1312,44 @@ const server = http.createServer((req, res) => {
       return r.n + ' / ' + r.gp + ' / v3=' + r3.n + ' / v4=ok';
     });
 
+    // v0.5.16 配置备份：导出下载 → 破坏存储 → 导入恢复全链路
+    await step('配置备份：导出下载文件，导入可恢复被清掉的配置', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.reload();
+      await optsPage.waitForTimeout(900);
+      // 导出（捕获下载并落盘）
+      const [download] = await Promise.all([
+        optsPage.waitForEvent('download', { timeout: 8000 }),
+        optsPage.locator('#config-export').click()
+      ]);
+      const dlPath = await download.path();
+      const fname = download.suggestedFilename();
+      if (!/^xcc-config-\d{12}\.json$/.test(fname)) throw new Error('导出文件名异常: ' + fname);
+      const backup = JSON.parse(fs.readFileSync(dlPath, 'utf8'));
+      if (backup.app !== 'x-comment-plugin' || !backup.settings || !backup.settings.provider) {
+        throw new Error('导出内容结构异常');
+      }
+      // 破坏：清掉供应商档案与模型（模拟"新版丢配置"）
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.custom = { baseUrl: '', apiKey: '', model: 'gpt-4o-mini', models: ['gpt-4o-mini'] };
+        settings.customVendors = [];
+        await chrome.storage.local.set({ settings });
+      });
+      // 导入备份（confirm 全局 accept）→ 页面自动 reload
+      await optsPage.locator('#config-import').setInputFiles(dlPath);
+      await optsPage.waitForLoadState('load');
+      await optsPage.waitForTimeout(900);
+      const restored = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.custom.baseUrl + '/' + settings.provider;
+      });
+      if (!restored.startsWith('http://localhost:8787/v1')) {
+        throw new Error('导入未恢复配置: ' + restored);
+      }
+      return fname;
+    });
+
     // v0.5.0 面板左右切换（storage.onChanged → applySettings → .left 类）；v0.5.1 默认右侧
     await step('面板位置切换：panelSide=left 贴左缘，恢复 right 贴右缘', async () => {
       const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));

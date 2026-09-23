@@ -876,6 +876,73 @@ function initPresetUI() {
   renderPresets();
 }
 
+// ---------- 配置备份（v0.5.16：导出/导入——升级换路径、换电脑、给朋友配机不再重填） ----------
+
+async function exportConfig() {
+  const s = await xccGetSettings(); // 存储里的最新值
+  const payload = {
+    app: 'x-comment-plugin',
+    format: 1,
+    exportedAt: new Date().toISOString(),
+    version: chrome.runtime.getManifest().version,
+    settings: s
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12); // YYYYMMDDHHmm
+  a.href = url;
+  a.download = 'xcc-config-' + ts + '.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  $('backup-status').textContent = '✓ 已导出（文件在浏览器下载目录，请妥善保管）';
+  toast('配置已导出');
+}
+
+function importConfigFile(file) {
+  const reader = new FileReader();
+  reader.onload = async () => {
+    let data = null;
+    try {
+      data = JSON.parse(String(reader.result));
+    } catch (e) {
+      /* 走下方格式报错 */
+    }
+    // 兼容两种形态：{app, settings:{…}} 备份文件，或直接就是 settings 对象
+    const raw =
+      data && data.settings && typeof data.settings === 'object'
+        ? data.settings
+        : data && typeof data === 'object' && data.provider
+          ? data
+          : null;
+    if (!raw) {
+      $('backup-status').textContent = '✗ 不是有效的配置文件';
+      toast('导入失败：文件格式不对', true);
+      return;
+    }
+    if (!confirm('导入将整体覆盖当前全部配置（供应商 / Key / 提示词 / 参数 / 授权），确定？')) return;
+    try {
+      const merged = xccMergeSettings(raw); // 走合并规范化：旧版本备份缺字段自动补齐
+      await chrome.storage.local.set({ settings: merged });
+      toast('配置已导入，页面即将刷新');
+      setTimeout(() => location.reload(), 900);
+    } catch (e) {
+      $('backup-status').textContent = '✗ 导入失败：' + (e && e.message ? e.message : e);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function initBackupUI() {
+  $('config-export').addEventListener('click', exportConfig);
+  $('config-import-btn').addEventListener('click', () => $('config-import').click());
+  $('config-import').addEventListener('change', () => {
+    const f = $('config-import').files && $('config-import').files[0];
+    if (f) importConfigFile(f);
+    $('config-import').value = ''; // 复位以允许重复选择同一文件
+  });
+}
+
 // ---------- 生成参数 ----------
 
 function initParamsUI() {
@@ -959,6 +1026,7 @@ function initUpdateBanner() {
     initProviderUI();
     initPresetUI();
     initParamsUI();
+    initBackupUI();
     initUpdateBanner();
     restoreOAuthPending().catch(() => {}); // 有未完成的设备授权则自动续上
   } catch (e) {

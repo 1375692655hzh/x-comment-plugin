@@ -166,6 +166,13 @@ check(sw.includes('不可改出病句'), '改写层防病句条款');
 check(common.includes('谁买单'), '省流条态度多样化（治"最后谁买单"式同质化）');
 check(common.includes('不替当事方编动机'), '深析条补编动机禁令');
 check(common.includes('presetsV4'), '存在 presetsV4 迁移标记');
+
+// 5.14 v0.5.16 门禁：配置备份（导出/导入——换路径/换电脑/给朋友配机不丢设置）
+check(oh.includes('id="config-export"') && oh.includes('id="config-import"'), '设置页存在配置导出/导入控件');
+check(oj.includes('function exportConfig') && oj.includes('function importConfigFile'), 'options 有导出/导入实现');
+check(oj.includes("a.download = 'xcc-config-"), '导出文件名带前缀与时间戳');
+check(oj.includes('xccMergeSettings(raw)'), '导入走合并规范化（旧备份缺字段自动补齐）');
+check(oh.includes('别公开转发'), '导出含明文 Key 的安全提示');
 }
 
 // 6. manifest 引用的文件都存在
