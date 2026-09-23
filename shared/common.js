@@ -226,11 +226,11 @@ function xccMergeSettings(saved) {
     const extras = genPresets.filter((g) => g && g.id && !builtinIds.has(g.id));
     genPresets = [...XCC_DEFAULTS.genPresets, ...extras];
   } else if (!s.presetsV4) {
-    // v0.5.15：省流党/深度分析两条再升级（同款按 id 替换，自定义预设保留）
+    // v0.5.15：省流党/深度分析两条再升级。按 id 原位替换（保持列表顺序稳定），
+    // 用户自定义预设（extras）天然保留
     const v4Ids = new Set(['g-tldr', 'g-deep']);
-    const extras = genPresets.filter((g) => g && g.id && !v4Ids.has(g.id));
     const fresh = XCC_DEFAULTS.genPresets.filter((g) => v4Ids.has(g.id));
-    genPresets = [...extras, ...fresh]; // 顺序变化无碍：UI 按 name 展示，active 走 id
+    genPresets = genPresets.map((g) => fresh.find((x) => x.id === g.id) || g);
   }
   // active 指向已删除的预设时收敛到首个（防下拉空选中/GENERATE 走错预设）
   if (!personaPresets.some((p) => p.id === activePersonaId)) {

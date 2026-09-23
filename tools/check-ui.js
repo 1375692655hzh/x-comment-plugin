@@ -161,7 +161,8 @@ check(sw.includes('省流：」）必须原样保留'), '人味改写保留风�
 
 // 5.13 v0.5.15 门禁：改写层三不改 + 句数回查 + 态度多样化（A/B 盲评修订版）
 check(sw.includes('只改措辞') && sw.includes('句子数量不得增减'), '人味改写三不改（只改措辞/句数不增/事实零增改）');
-check(sw.includes('改写疑似加戏') || sw.includes('countSent'), 'GENERATE 有句数回查（改写加戏回退初稿）');
+check(sw.includes('改写疑似加戏') && sw.includes('countSent(rewritten) > countSent(text)'), 'GENERATE 有句数回查（改写加戏回退初稿）');
+check(sw.includes('改写结果为空'), '改写空串守卫（围栏壳清洗后为空回退初稿）');
 check(sw.includes('不可改出病句'), '改写层防病句条款');
 check(common.includes('谁买单'), '省流条态度多样化（治"最后谁买单"式同质化）');
 check(common.includes('不替当事方编动机'), '深析条补编动机禁令');
@@ -173,6 +174,9 @@ check(oj.includes('function exportConfig') && oj.includes('function importConfig
 check(oj.includes("a.download = 'xcc-config-"), '导出文件名带前缀与时间戳');
 check(oj.includes('xccMergeSettings(raw)'), '导入走合并规范化（旧备份缺字段自动补齐）');
 check(oh.includes('别公开转发'), '导出含明文 Key 的安全提示');
+check(oj.includes('storage.onChanged.addListener'), '设置页监听外部配置变更自动刷新（防陈旧页静默覆盖）');
+check(oj.includes("data.app !== 'x-comment-plugin'"), '导入信封校验（拒绝非本产品配置文件）');
+check(oj.includes('healOrphanPage(true)'), '备份操作孤儿页自愈对接');
 }
 
 // 6. manifest 引用的文件都存在

@@ -143,7 +143,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           try {
             const rewritten = await xccChatCompletion(cfg, buildHumanizeMessages(s, text), s.genParams);
             const countSent = (t) => (String(t).match(/[。！？!?…]/g) || []).length;
-            if (countSent(rewritten) > countSent(text)) {
+            if (!String(rewritten).trim()) {
+              // review 真缺口：模型只回围栏壳时清洗结果为空串——空评论不能放行
+              humanizeError = '改写结果为空，已回退初稿';
+            } else if (countSent(rewritten) > countSent(text)) {
               humanizeError = '改写疑似加戏（句子数变多），已回退初稿';
             } else {
               text = rewritten;

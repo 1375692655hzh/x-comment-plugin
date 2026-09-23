@@ -52,13 +52,42 @@ async function loadSettings() {
 
 // 页内串行化：快速连点两个保存不会交错丢写
 let saveChain = Promise.resolve();
+// 本页最后一次 settings 写盘时间：storage.onChanged 据此区分"自己写"与"外部写"
+let lastLocalWrite = 0;
 function saveMutate(fn) {
   const run = saveChain.then(async () => {
+    lastLocalWrite = Date.now();
     SETTINGS = await xccMutateSettings(fn);
   });
   saveChain = run.catch(() => {});
   return run;
 }
+
+// 外部 settings 变更（导入 / 面板切换 / 另一开着的设置页）→ 软同步：重读配置并全量
+// 重渲染（不 reload——reload 会销毁执行上下文且打断一切进行中操作）。
+// v0.5.17（review P1-1）：此前无监听，导入后被陈旧页点保存会把恢复的配置静默覆盖回旧值。
+// 自己的写在 2s 窗口内跳过（本页保存频繁触发 onChanged，全部重渲染会打断编辑）。
+chrome.storage.onChanged.addListener(async (changes, area) => {
+  if (area !== 'local' || !changes.settings) return;
+  if (Date.now() - lastLocalWrite < 2000) return; // 自己刚写的
+  try {
+    await loadSettings();
+  } catch (e) {
+    return;
+  }
+  renderVendorRows();
+  fillProviderForms();
+  renderOAuthStatus();
+  renderPresets();
+  $('temp').value = SETTINGS.genParams.temperature;
+  $('temp-val').textContent = SETTINGS.genParams.temperature;
+  $('maxtok').value = SETTINGS.genParams.maxTokens;
+  $('lang').value = SETTINGS.genParams.language;
+  $('reasoning').value = ['low', 'medium', 'high'].includes(SETTINGS.genParams.reasoningEffort)
+    ? SETTINGS.genParams.reasoningEffort
+    : 'default';
+  $('panel-side').value = SETTINGS.panelSide === 'left' ? 'left' : 'right';
+});
 
 function toast(msg, isErr) {
   const t = $('toast');
@@ -879,7 +908,14 @@ function initPresetUI() {
 // ---------- 配置备份（v0.5.16：导出/导入——升级换路径、换电脑、给朋友配机不再重填） ----------
 
 async function exportConfig() {
-  const s = await xccGetSettings(); // 存储里的最新值
+  let s;
+  try {
+    s = await xccGetSettings(); // 存储里的最新值
+  } catch (e) {
+    // 孤儿页（扩展重载后 chrome.* 抛 "Extension context invalidated"）→ 走自愈
+    healOrphanPage(true);
+    return;
+  }
   const payload = {
     app: 'x-comment-plugin',
     format: 1,
@@ -901,6 +937,10 @@ async function exportConfig() {
 
 function importConfigFile(file) {
   const reader = new FileReader();
+  reader.onerror = () => {
+    $('backup-status').textContent = '✗ 文件读取失败，请重试';
+    toast('导入失败：文件读取失败', true);
+  };
   reader.onload = async () => {
     let data = null;
     try {
@@ -908,7 +948,13 @@ function importConfigFile(file) {
     } catch (e) {
       /* 走下方格式报错 */
     }
-    // 兼容两种形态：{app, settings:{…}} 备份文件，或直接就是 settings 对象
+    // 兼容两种形态：{app, settings:{…}} 备份文件，或直接就是 settings 对象。
+    // 信封有 app 字段但不是本产品的 → 拒绝（防拿别的工具配置误导入）
+    if (data && data.app && data.app !== 'x-comment-plugin') {
+      $('backup-status').textContent = '✗ 不是 X 评论副驾的配置文件';
+      toast('导入失败：不是本插件的配置文件', true);
+      return;
+    }
     const raw =
       data && data.settings && typeof data.settings === 'object'
         ? data.settings
@@ -923,10 +969,20 @@ function importConfigFile(file) {
     if (!confirm('导入将整体覆盖当前全部配置（供应商 / Key / 提示词 / 参数 / 授权），确定？')) return;
     try {
       const merged = xccMergeSettings(raw); // 走合并规范化：旧版本备份缺字段自动补齐
-      await chrome.storage.local.set({ settings: merged });
+      // 挂入页内写盘队列（review P1-1：与在途保存串行，防交错覆盖），并打"自己写"标记
+      const run = saveChain.then(async () => {
+        lastLocalWrite = Date.now();
+        await chrome.storage.local.set({ settings: merged });
+      });
+      saveChain = run.catch(() => {});
+      await run;
       toast('配置已导入，页面即将刷新');
       setTimeout(() => location.reload(), 900);
     } catch (e) {
+      if (e && /Extension context invalidated|chrome\.runtime/i.test(String(e && e.message))) {
+        healOrphanPage(true); // 孤儿页写盘失败 → 自愈
+        return;
+      }
       $('backup-status').textContent = '✗ 导入失败：' + (e && e.message ? e.message : e);
     }
   };

@@ -1336,10 +1336,16 @@ const server = http.createServer((req, res) => {
         settings.customVendors = [];
         await chrome.storage.local.set({ settings });
       });
-      // 导入备份（confirm 全局 accept）→ 页面自动 reload
+      // 导入备份（confirm 全局 accept）。导入功能自带"成功后 900ms 自动 reload"——
+      // 在旧文档打标记，等标记消失（=新文档已落地）再断言，避免 evaluate 撞上导航
+      await optsPage.evaluate(() => {
+        window.__preImport = 1;
+      });
       await optsPage.locator('#config-import').setInputFiles(dlPath);
-      await optsPage.waitForLoadState('load');
-      await optsPage.waitForTimeout(900);
+      await optsPage.waitForFunction(() => !window.__preImport, null, { timeout: 10000 }).catch(() => {});
+      await optsPage.waitForTimeout(800);
+      const markGone = await optsPage.evaluate(() => !window.__preImport);
+      if (!markGone) throw new Error('导入成功后未自动刷新页面');
       const restored = await optsPage.evaluate(async () => {
         const { settings } = await chrome.storage.local.get('settings');
         return settings.custom.baseUrl + '/' + settings.provider;
@@ -1347,6 +1353,25 @@ const server = http.createServer((req, res) => {
       if (!restored.startsWith('http://localhost:8787/v1')) {
         throw new Error('导入未恢复配置: ' + restored);
       }
+      // v0.5.17（review P1-1 回归门禁）：外部写 settings → 设置页软同步（重读+重渲染，
+      // 不 reload——reload 会销毁执行上下文）。验证：外部改 panelSide → 本页下拉自动跟新
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.panelSide = 'left'; // 外部变更（模拟面板/他页写入）
+        await chrome.storage.local.set({ settings });
+      });
+      await optsPage.waitForFunction(() => document.getElementById('panel-side').value === 'left', null, {
+        timeout: 8000
+      });
+      // 收尾恢复右侧
+      await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        settings.panelSide = 'right';
+        await chrome.storage.local.set({ settings });
+      });
+      await optsPage.waitForFunction(() => document.getElementById('panel-side').value === 'right', null, {
+        timeout: 8000
+      });
       return fname;
     });
 
