@@ -6,3 +6,5 @@ tools/smoke/ext/
 tools/smoke/profile/
 tools/smoke/panel.png
 *.pem
+tools/smoke/keytest/
+tools/smoke/keytest.log
