@@ -1,6 +1,6 @@
 {
   "name": "X 评论副驾 (X Comment Copilot)",
-  "version": "0.5.18",
+  "version": "0.5.19",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6qRWQlt2iI4fO6dsx4h21DEWahOXpTcp7q8RSkaZ50BPZs0DAmJVEk9IHCDvPj6yeBJO6dGSsHuU+IN4QYRrFhKz2PCni7b5+0Na/kvWWCYyOToaYBOVc7W5leObWGrsSfdk7CdIi7Idvr8Q5d/t8kajohLqpWkwdECaa0hBzqfXxXl80vycighF+KdtUEQ7yZZ3VxLFKcWekYWoPS7sciFxzf88hXmHSgSP968r97I9zsbC6D4C4MfpU0IS8XE4L13zM3NC/zu60EFL7PCbQyrzVnV/Yojp8K5f/Swjp0HqvYGMxaJwpPT/nzHx8qhDaMAW725JLzC3vYDCpO162QIDAQAB",
   "description": "在 X/Twitter 上识别推文，用自定义「人设 + 生成」提示词一键生成高质量回复。支持 xAI API Key、任意 OpenAI 兼容接口或 Grok 账号授权。",
   "manifest_version": 3,
@@ -20,8 +20,7 @@
   ],
   "optional_host_permissions": [
     "https://*/*",
-    "http://localhost/*",
-    "http://127.0.0.1/*"
+    "http://*/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js"

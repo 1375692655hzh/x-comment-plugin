@@ -178,6 +178,10 @@ const server = http.createServer((req, res) => {
   });
 
   const errors = [];
+  // v0.5.19 复制 E2E：给假 X 页授予剪贴板读写（content script 复制 + 主世界读回校验）
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin: 'http://localhost:8787'
+  });
   const page = context.pages()[0] || (await context.newPage());
   context.on('serviceworker', (w) => console.log('[SW registered]', w.url()));
   page.on('console', (m) => {
@@ -1311,6 +1315,48 @@ const server = http.createServer((req, res) => {
       if (r4.v4 !== true) throw new Error('presetsV4 标记未置位');
       return r.n + ' / ' + r.gp + ' / v3=' + r3.n + ' / v4=ok';
     });
+
+      await step('面板下拉跟真存储：远端改 activeGenId 后显示同步', async () => {
+        const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+        if (!optsPage) throw new Error('options 页未打开（步骤顺序错误）');
+        try {
+          // 先把面板切回第 0 项，制造"显示与即将写入的存储值不同"的前置态
+          await page.locator('.xcc-gen').selectOption({ index: 0 });
+          await page.waitForTimeout(600);
+          await optsPage.evaluate(async () => {
+            const { settings } = await chrome.storage.local.get('settings');
+            settings.activeGenId = 'g-deep'; // 外部变更（模拟设置页改预设）
+            await chrome.storage.local.set({ settings });
+          });
+          await page.waitForFunction(() => {
+            const g = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-gen');
+            return !!(g && g.value === 'g-deep');
+          }, null, { timeout: 8000 });
+          return 'g-deep 同步';
+        } finally {
+          // 无论成败恢复默认风格，避免污染后续步骤
+          await optsPage.evaluate(async () => {
+            const { settings } = await chrome.storage.local.get('settings');
+            settings.activeGenId = 'g-agree';
+            await chrome.storage.local.set({ settings });
+          }).catch(() => {});
+          await page.waitForTimeout(600);
+        }
+      });
+      await step('复制按钮真实 E2E：写入剪贴板并读回校验', async () => {
+        const sample = 'smoke-copy-' + Date.now();
+        await page.locator('.xcc-out').fill(sample);
+        await page.locator('.xcc-panel [data-act="copy"]').click();
+        await page.waitForFunction(() => {
+          const st = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-status');
+          return !!(st && (st.textContent.includes('已复制') || st.textContent.includes('复制失败')));
+        }, null, { timeout: 8000 });
+        const stTxt = await page.locator('.xcc-status').innerText();
+        if (stTxt.includes('复制失败')) throw new Error('复制失败: ' + stTxt);
+        const clip = await page.evaluate(() => navigator.clipboard.readText());
+        if (clip !== sample) throw new Error('剪贴板内容不符: ' + JSON.stringify(clip.slice(0, 40)));
+        return 'clipboard ok';
+      });
 
     // v0.5.16 配置备份：导出下载 → 破坏存储 → 导入恢复全链路
     await step('配置备份：导出下载文件，导入可恢复被清掉的配置', async () => {

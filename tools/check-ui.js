@@ -181,6 +181,14 @@ check(oj.includes('healOrphanPage(true)'), '备份操作孤儿页自愈对接');
 // 5.15 v0.5.18 门禁：manifest key 固定扩展 ID（换路径/重装/上架同 ID，配置永驻）
 check(/"key":\s*"[A-Za-z0-9+/]{300,}={0,2}"/.test(read('manifest.json')), 'manifest 含 key 字段（RSA 公钥，固定扩展 ID）');
 check(!fs.readFileSync(path.join(root, 'manifest.json'), 'utf8').includes('PRIVATE KEY'), 'manifest 只含公钥（无私钥泄漏）');
+
+// 5.16 v0.5.19 门禁：历史遗留清账（复制诚实回执/下拉显示=实际/局域网 http 端点）
+check(content.includes("document.execCommand('copy')") && content.includes('复制失败'), '复制失败有 execCommand 兜底且诚实报错（不再假报已复制）');
+check(!content.includes('保留用户在当前页面已选的项'), 'fillSelect 不再保留旧选项（显示严格=存储值）');
+{
+  const man2 = JSON.parse(read('manifest.json'));
+  check((man2.optional_host_permissions || []).includes('http://*/*'), 'optional 权限含 http://*/*（局域网 Ollama/LM Studio 端点可授权）');
+}
 }
 
 // 6. manifest 引用的文件都存在

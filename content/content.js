@@ -293,7 +293,6 @@
   }
 
   function fillSelect(sel, list, activeId) {
-    const prev = sel.value;
     sel.textContent = '';
     for (const p of list) {
       const o = document.createElement('option');
@@ -301,9 +300,9 @@
       o.textContent = p.name || p.id;
       sel.appendChild(o);
     }
+    // 显示严格 = 存储里的 activeId（v0.5.19 去掉 prev 保留：设置页远端改预设后面板
+    // 曾显示旧选项、实际生成却用新值——与 v0.5.3 模型下拉同类的"显示≠实际"问题）
     sel.value = list.some((p) => p.id === activeId) ? activeId : (list[0] && list[0].id) || '';
-    // 面板开着时刷新，保留用户在当前页面已选的项
-    if (prev && list.some((p) => p.id === prev)) sel.value = prev;
   }
 
   // 生成按钮态：当前接入方式未配置完成时禁用；
@@ -869,11 +868,24 @@
     return 'fail';
   }
 
+  // 复制：clipboard API → execCommand 兜底；返回是否成功（v0.5.19：失败不再假报"已复制"）
   async function copyText(t) {
     try {
       await navigator.clipboard.writeText(t);
+      return true;
     } catch (e) {
-      /* 剪贴板不可用时静默 */
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = t;
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return !!ok;
+      } catch (e2) {
+        return false;
+      }
     }
   }
 
@@ -1048,8 +1060,8 @@
     } else if (act === 'insert') {
       insertResult();
     } else if (act === 'copy') {
-      copyText(els.out.value);
-      setStatus('已复制');
+      const ok = await copyText(els.out.value);
+      setStatus(ok ? '已复制' : '复制失败：剪贴板不可用，请手动全选输出框复制', !ok);
     } else if (act === 'regen') {
       generate();
     } else if (act === 'plan-free' || act === 'plan-premium') {
