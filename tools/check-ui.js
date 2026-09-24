@@ -177,6 +177,10 @@ check(oh.includes('别公开转发'), '导出含明文 Key 的安全提示');
 check(oj.includes('storage.onChanged.addListener'), '设置页监听外部配置变更自动刷新（防陈旧页静默覆盖）');
 check(oj.includes("data.app !== 'x-comment-plugin'"), '导入信封校验（拒绝非本产品配置文件）');
 check(oj.includes('healOrphanPage(true)'), '备份操作孤儿页自愈对接');
+
+// 5.15 v0.5.18 门禁：manifest key 固定扩展 ID（换路径/重装/上架同 ID，配置永驻）
+check(/"key":\s*"[A-Za-z0-9+/]{300,}={0,2}"/.test(read('manifest.json')), 'manifest 含 key 字段（RSA 公钥，固定扩展 ID）');
+check(!fs.readFileSync(path.join(root, 'manifest.json'), 'utf8').includes('PRIVATE KEY'), 'manifest 只含公钥（无私钥泄漏）');
 }
 
 // 6. manifest 引用的文件都存在

@@ -5,3 +5,4 @@ desktop.ini
 tools/smoke/ext/
 tools/smoke/profile/
 tools/smoke/panel.png
+*.pem
