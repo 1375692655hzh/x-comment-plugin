@@ -1047,6 +1047,7 @@ function initUpdateBanner() {
   (async () => {
     const { xccUpdate } = await chrome.storage.local.get('xccUpdate');
     renderUpdateBanner(xccUpdate);
+    xccRefreshGrokProtocol(); // 顺带热更 grok 伪装版本号（内部 24h 节流、失败静默）
     try {
       const info = await Promise.race([xccCheckUpdate(), sleep(8000).then(() => null)]);
       if (info) renderUpdateBanner(info);

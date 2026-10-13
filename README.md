@@ -102,6 +102,10 @@ x-comment-plugin/
 
 插件内检测逻辑：浏览器启动/扩展安装时后台对比 GitHub main 分支的版本号（jsDelivr → raw.githubusercontent → GitHub API 三源回退，国内可直连 jsDelivr），设置页也可「重新检查」。
 
+**Grok 协议版本热更（免重装）**：Grok 授权通道靠 `x-grok-client-*` 识别头把自己伪装成 grok CLI 客户端，其中版本号须跟随真实 CLI 的最新 stable。自 v0.5.20 起，该版本号可被远端热更：插件在浏览器启动/打开设置页时拉取仓库根的 [`grok-protocol.json`](https://github.com/1375692655hzh/x-comment-plugin/blob/main/grok-protocol.json)（同款三源回退，24 小时节流），拉不到或校验不过就静默用包内默认值。因此 **xAI 后端若开始拒绝旧客户端版本，无需发布新版插件**——仓库里改一个数字推送，全体用户次日内自动生效。安全边界：远端只能改这一个版本号字符串（须通过 `数字.数字.数字` 校验），端点、Client ID 等敏感配置永不可被远端修改。
+
+> 维护者流程（CLI 出新版时）：本机跑 `grok update && grok --version` → 把版本号写进 `grok-protocol.json` 的 `clientVersion` → 提交推送 GitHub main。包内默认值 `XCC_GROK_CLIENT_VERSION_DEFAULT`（shared/api.js）随下个正式版本对齐。
+
 **思考强度**：设置页「生成参数 → 思考强度」可选 low / medium / high（对应 `reasoning_effort` 参数，仅 Grok 4.5 / 4.6 等推理模型生效；不发送时服务端默认 high 且推理无法关闭，不想思考请选 non-reasoning 模型）。默认「不发送」以兼容所有接口；Grok 订阅授权通道若不认该参数报错，切回默认即可。生成慢时优先试 low 档。
 
 **模型可用性与生成等待**：Grok 授权后模型下拉自动发现你账号实际可用的模型并标注「（已验证）」；内置候选标「（未验证）」，选未验证模型可能被服务端拒绝或长时间不回包。生成请求**不设超时**：等待期间每 15 秒播报耗时，按钮变为「⏹ 放弃等待」可随时点击结束本次等待（不切断请求，晚到的结果会被忽略）；生成快慢由你自行判断。

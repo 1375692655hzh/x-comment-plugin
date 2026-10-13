@@ -14,12 +14,17 @@ const XCC_UPDATE_SOURCES = [
   'https://api.github.com/repos/' + XCC_REPO + '/contents/manifest.json?ref=main'
 ];
 
-// cli-chat-proxy.grok.com 依赖这三个头把请求识别为 grok CLI 客户端
-const XCC_GROK_CLIENT_HEADERS = {
-  'x-grok-client-version': '0.2.101',
-  'x-grok-client-surface': 'grok-build',
-  'x-grok-client-mode': 'grok-shell'
-};
+// cli-chat-proxy.grok.com 依赖这三个头把请求识别为 grok CLI 客户端。
+// 版本号须跟随真实 grok CLI 的最新 stable（后端可能拒绝过旧客户端），可被远端
+// grok-protocol.json 热更——但远端只允许改这一个字段且必须过 semver 校验，
+// surface/mode/apiBase/clientId 永不远端可控（防 repo 失守后 token 被引向恶意端点）。
+const XCC_GROK_CLIENT_VERSION_DEFAULT = '1.0.52'; // 2026-10-13 本机 grok CLI stable 实测
+const XCC_GROK_PROTOCOL_RE = /^\d+\.\d+\.\d+$/;
+const XCC_GROK_PROTOCOL_SOURCES = [
+  'https://cdn.jsdelivr.net/gh/' + XCC_REPO + '@main/grok-protocol.json',
+  'https://raw.githubusercontent.com/' + XCC_REPO + '/main/grok-protocol.json',
+  'https://api.github.com/repos/' + XCC_REPO + '/contents/grok-protocol.json?ref=main'
+];
 
 // ---------- settings 统一读改写（读最新 → 改 → 写回，禁止整份快照覆盖） ----------
 
@@ -67,6 +72,57 @@ async function xccCheckUpdate() {
   };
   await chrome.storage.local.set({ xccUpdate: info });
   return info;
+}
+
+// ---------- Grok 伪装头：版本号远端热更（读取侧） ----------
+
+// 优先用 storage 里远端下发的 clientVersion（过 semver 校验），否则回落包内默认。
+async function xccGrokClientHeaders() {
+  const { xccGrokProtocol } = await chrome.storage.local.get('xccGrokProtocol');
+  const remote =
+    xccGrokProtocol && XCC_GROK_PROTOCOL_RE.test(String(xccGrokProtocol.clientVersion || ''))
+      ? String(xccGrokProtocol.clientVersion)
+      : '';
+  return {
+    'x-grok-client-version': remote || XCC_GROK_CLIENT_VERSION_DEFAULT,
+    'x-grok-client-surface': 'grok-build',
+    'x-grok-client-mode': 'grok-shell'
+  };
+}
+
+// 拉取侧：三源回退（与 xccFetchRemoteVersion 同款），24h 节流；任何失败静默保留旧缓存。
+// 返回当前生效的协议缓存（可能为 null = 从未成功拉过，调用方不关心时可不接返回值）。
+async function xccRefreshGrokProtocol(force) {
+  const { xccGrokProtocol } = await chrome.storage.local.get('xccGrokProtocol');
+  if (
+    !force &&
+    xccGrokProtocol &&
+    Number.isFinite(xccGrokProtocol.fetchedAt) &&
+    Date.now() - xccGrokProtocol.fetchedAt < 86400000
+  ) {
+    return xccGrokProtocol;
+  }
+  for (const url of XCC_GROK_PROTOCOL_SOURCES) {
+    try {
+      const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(6000) });
+      if (!res.ok) continue;
+      let obj = null;
+      if (url.startsWith('https://api.github.com')) {
+        const data = await res.json();
+        obj = JSON.parse(atob((data.content || '').replace(/\s/g, '')));
+      } else {
+        obj = await res.json();
+      }
+      const v = obj ? String(obj.clientVersion || '') : '';
+      if (!XCC_GROK_PROTOCOL_RE.test(v)) continue; // 脏值视同此源失败，换下一个
+      const next = { clientVersion: v, fetchedAt: Date.now() };
+      await chrome.storage.local.set({ xccGrokProtocol: next });
+      return next;
+    } catch (e) {
+      /* 换下一个源 */
+    }
+  }
+  return xccGrokProtocol || null;
 }
 
 // ---------- Grok OAuth 设备流（纯函数，不写存储） ----------
@@ -156,7 +212,7 @@ async function xccListGrokModels(o) {
   }
   const url = String(o.apiBase || '').replace(/\/+$/, '') + '/models';
   const res = await fetch(url, {
-    headers: { Authorization: 'Bearer ' + tokens.access_token, ...XCC_GROK_CLIENT_HEADERS },
+    headers: { Authorization: 'Bearer ' + tokens.access_token, ...(await xccGrokClientHeaders()) },
     signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -201,7 +257,7 @@ async function xccResolveProviderCfg(s) {
       baseUrl: o.apiBase,
       apiKey: tokens.access_token,
       model: o.model,
-      extraHeaders: { ...XCC_GROK_CLIENT_HEADERS } // 勿直接给共享对象本体
+      extraHeaders: await xccGrokClientHeaders() // 版本号可被远端热更，每次现取
     };
   }
   throw new Error('未知的接入方式：' + s.provider);

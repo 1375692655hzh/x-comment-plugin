@@ -59,7 +59,7 @@ const t = (name, ok, extra) => {
 const oauthState = { grant: false };
 // 真实生成链路 mock：记录请求体供断言；reply 可注入自定义回复；
 // emptyLength='once' 模拟"推理模型思考耗尽"一次（finish_reason=length+空 content+reasoning_content），'always' 持续耗尽
-const mockLLM = { count: 0, lastBody: null, lastAuth: '', reply: null, humReply: null, emptyLength: null, emptyLengthHit: 0 };
+const mockLLM = { count: 0, lastBody: null, lastAuth: '', reply: null, humReply: null, emptyLength: null, emptyLengthHit: 0, modelsHeaders: null };
 
 const server = http.createServer((req, res) => {
   const send = (code, body, type) => {
@@ -82,6 +82,7 @@ const server = http.createServer((req, res) => {
       : send(400, { error: 'authorization_pending' });
   }
   if (req.method === 'GET' && req.url === '/v1/models') {
+    mockLLM.modelsHeaders = { ...req.headers }; // 记录伪装头供 x-grok-client-version 断言
     return send(200, {
       object: 'list',
       data: [{ id: 'grok-4.3' }, { id: 'grok-4.6-discovered' }, { id: 'grok-code-fast-1' }]
@@ -1039,6 +1040,60 @@ const server = http.createServer((req, res) => {
       if (!txt.includes('3')) throw new Error('发现数异常: ' + txt);
       const n = await optsPage.locator('#oauth-model option').count();
       if (n < 7) throw new Error('发现+兜底合并异常: ' + n); // 3 发现 ∪ 5 兜底（重叠2）+ 当前值 + 自定义项
+    });
+    // v0.5.20 grok 伪装版本号热更：storage 合法值透传 / 脏值 semver 拒绝回落 / 清空回落。
+    // 注入值都带 fetchedAt=now 满足 24h 节流，防止页面 init 的真网拉取覆盖测试注入值。
+    const waitModelsHeader = async (expect) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15000) {
+        const h = mockLLM.modelsHeaders && mockLLM.modelsHeaders['x-grok-client-version'];
+        if (h === expect) return;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      throw new Error(
+        '期望 x-grok-client-version=' + expect + '，实际：' +
+          (mockLLM.modelsHeaders ? mockLLM.modelsHeaders['x-grok-client-version'] : '未收到 /v1/models 请求')
+      );
+    };
+    await step('grok 协议热更：合法远端版本号透传到请求头', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        await chrome.storage.local.set({ xccGrokProtocol: { clientVersion: '9.9.9', fetchedAt: Date.now() } });
+      });
+      mockLLM.modelsHeaders = null;
+      await optsPage.reload();
+      await waitModelsHeader('9.9.9');
+      const h = mockLLM.modelsHeaders;
+      if (h['x-grok-client-surface'] !== 'grok-build' || h['x-grok-client-mode'] !== 'grok-shell') {
+        throw new Error('surface/mode 头异常: ' + JSON.stringify({ s: h['x-grok-client-surface'], m: h['x-grok-client-mode'] }));
+      }
+      return '9.9.9';
+    });
+    await step('grok 协议热更：脏版本号被 semver 校验拒绝，回落包内默认', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        await chrome.storage.local.set({ xccGrokProtocol: { clientVersion: 'evil-inject', fetchedAt: Date.now() } });
+      });
+      mockLLM.modelsHeaders = null;
+      await optsPage.reload();
+      await waitModelsHeader('1.0.52');
+      return '1.0.52';
+    });
+    await step('grok 协议热更：清空缓存回落包内默认', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      await optsPage.evaluate(async () => {
+        await chrome.storage.local.remove('xccGrokProtocol');
+      });
+      mockLLM.modelsHeaders = null;
+      await optsPage.reload();
+      await waitModelsHeader('1.0.52');
+      // 收尾护栏：等发现流程把 select 重建完，别让后续「模型选择落盘」测试抢跑
+      await optsPage.waitForFunction(
+        () => [...document.querySelectorAll('#oauth-model option')].some((o) => o.value === 'grok-4.6-discovered'),
+        null,
+        { timeout: 15000 }
+      );
+      return '1.0.52';
     });
     // 模型选择即时落盘（v0.4.1 问题回归门禁：改模型不再依赖「开始授权」）
     await step('模型选择变更即时落盘，reload 后保持', async () => {

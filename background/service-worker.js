@@ -203,10 +203,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // 异步 sendResponse
 });
 
-chrome.runtime.onStartup.addListener(() => xccCheckUpdate());
+chrome.runtime.onStartup.addListener(() => {
+  xccCheckUpdate();
+  xccRefreshGrokProtocol(); // 24h 节流；失败静默回落包内默认版本号
+});
 
 chrome.runtime.onInstalled.addListener(async () => {
   const { settings } = await chrome.storage.local.get('settings');
   if (!settings) await chrome.storage.local.set({ settings: XCC_DEFAULTS });
   xccCheckUpdate();
+  xccRefreshGrokProtocol();
 });
