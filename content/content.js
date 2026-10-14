@@ -773,6 +773,19 @@
     return !(btn.disabled || btn.getAttribute('aria-disabled') === 'true');
   }
 
+  // 发送钮解禁由框架 state→props 异步驱动，固定等一次会把慢渲染误判成幽灵插入
+  // （→ 白白触发高危的清空重插路径）。轮询最多 timeout 毫秒，期间解禁即认定
+  // state 已拿到文本。
+  async function sendReadySoon(editor, timeout) {
+    const until = timeout == null ? 1500 : timeout;
+    const t0 = Date.now();
+    while (!sendReady(editor)) {
+      if (Date.now() - t0 >= until) return false;
+      await sleep(100);
+    }
+    return true;
+  }
+
   // 清空编辑器（范围内全选后 delete，连托管树外的孤儿碎片一并清掉）
   function clearEditor(editor) {
     try {
@@ -781,6 +794,50 @@
     } catch (e) {
       return false;
     }
+  }
+
+  // 清空策略一：光标落托管叶子末尾后逐字符派发合成 beforeinput 退格——与首次
+  // 插入同通道走框架输入管线改 state。Lexical 不认脚本设置的 DOM 选区，全选 +
+  // execCommand delete 只能原生清 DOM（state 残留→回填/半截残渣的来源）。
+  function clearByBackspace(editor) {
+    try {
+      const n = Math.min(2000, editor.innerText.length + 3);
+      for (let i = 0; i < n; i++) {
+        editor.dispatchEvent(
+          new InputEvent('beforeinput', {
+            inputType: 'deleteContentBackward',
+            bubbles: true,
+            cancelable: true
+          })
+        );
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 清空并确认（v0.5.21）：残渣清不干净时绝不重插——"半截残渣 + 完整文案"仍恰好
+  // 含一份完整文本，出现次数式校验测不出来（用户实测：回复框文案重复两遍还报
+  // "已自动纠正成功"）。⚠ 实测 execCommand('delete') 只发 input 不发 beforeinput：
+  // 原生清的是 DOM、框架 state 原封不动，随后框架会把自己的 state 回填 DOM——
+  // 清空后必须等过长于框架回填窗口（本仓 mock 600ms）再信"空"。
+  async function clearEditorVerified(editor) {
+    for (let i = 0; i < 3; i++) {
+      if (!normEditorText(editor.innerText)) return true;
+      // 策略一：合成 beforeinput 逐字符退格——走框架输入管线改 state，DOM 由框架渲染，
+      // 不会出现 DOM/state 分叉；清不掉（框架不认合成事件/被吞）再试策略二
+      placeCaretInLeaf(editor);
+      await sleep(80); // 等 selectionchange → 框架内部选区同步
+      clearByBackspace(editor);
+      await sleep(700);
+      if (!normEditorText(editor.innerText)) return true;
+      // 策略二：脚本全选 + execCommand delete——原生清 DOM（连托管树外孤儿碎片），
+      // 框架 state 若残留会回填，由 700ms 后的复查与下一轮迭代兜住
+      clearEditor(editor);
+      await sleep(700);
+    }
+    return !normEditorText(editor.innerText);
   }
 
   // 兜底通道：合成 paste 走框架粘贴管线，插入必然落在框架状态内。
@@ -799,7 +856,8 @@
     }
   }
 
-  // 填入并校验：成功 = innerText 恰好包含一次目标文本。
+  // 填入并校验（v0.5.21 收紧）：成功 = 编辑器内容与目标文本严格一致——旧的
+  // "恰好包含一份"标准测不出半截残渣（残渣+完整文案也恰好含一份完整文本）。
   // 返回 'ok' | 'skip' | 'recovered' | 'fail'；失败时清场不留半份/重复内容。
   async function insertInto(editor, text) {
     const want = normEditorText(text);
@@ -818,26 +876,25 @@
     }
     let ok = frameworkInsert(editor, text) !== 'none';
     await sleep(200); // 等 Draft/Lexical 完成 模型↔DOM 同步再校验
-    if (ok && countOccurrences(normEditorText(editor.innerText), want) === 1) {
-      await sleep(250); // 发送钮解禁由 React state→props 异步驱动
-      if (sendReady(editor)) return 'ok';
-      // DOM 有字但发送钮未解禁：state 为空的幽灵插入 → 落入下方清空重插
+    if (ok && normEditorText(editor.innerText) === want) {
+      if (await sendReadySoon(editor)) return 'ok';
+      // DOM 有字但发送钮迟迟未解禁：state 为空的幽灵插入 → 落入下方清空重插
     }
 
-    // 异常（0 份或 ≥2 份或 state 空）：清空后重插
-    clearEditor(editor);
+    // 异常（有残渣/内容不符/state 空）：确认清空后重插；清不干净绝不重插，
+    // 直接判失败走剪贴板兜底（往残渣上叠文本正是"回复框重复两遍"的成因）
+    if (!(await clearEditorVerified(editor))) return 'fail';
     placeCaretInLeaf(editor);
     await sleep(80);
     ok = frameworkInsert(editor, text) !== 'none';
     await sleep(200);
-    await sleep(250);
-    if (ok && countOccurrences(normEditorText(editor.innerText), want) === 1 && sendReady(editor)) {
+    if (ok && normEditorText(editor.innerText) === want && (await sendReadySoon(editor))) {
       return 'recovered';
     }
 
     // 仍异常：DOM 直插进叶子 + 派发 input（部分框架构建不认领合成 beforeinput，
     // 但会从 DOM 重读内容重建 state——Draft 的 Android 兼容路径 editOnInput 同型）
-    clearEditor(editor);
+    if (!(await clearEditorVerified(editor))) return 'fail';
     placeCaretInLeaf(editor);
     try {
       const leaf =
@@ -852,19 +909,19 @@
       /* 忽略，走 paste 兜底 */
     }
     await sleep(300);
-    if (countOccurrences(normEditorText(editor.innerText), want) === 1 && sendReady(editor)) {
+    if (normEditorText(editor.innerText) === want && (await sendReadySoon(editor))) {
       return 'recovered';
     }
 
     // 最后兜底：合成 paste（走框架粘贴管线，插入必然落在框架状态内）
-    clearEditor(editor);
+    if (!(await clearEditorVerified(editor))) return 'fail';
     pasteInsert(editor, text);
     await sleep(400);
-    if (countOccurrences(normEditorText(editor.innerText), want) === 1 && sendReady(editor)) {
+    if (normEditorText(editor.innerText) === want && (await sendReadySoon(editor))) {
       return 'recovered';
     }
 
-    clearEditor(editor); // 彻底失败：清场，走剪贴板兜底
+    await clearEditorVerified(editor); // 彻底失败：尽力清场，走剪贴板兜底
     return 'fail';
   }
 
@@ -989,7 +1046,7 @@
         } else if (r === 'skip') {
           setStatus('回复框已包含该内容，未重复填入');
         } else {
-          setStatus('填入异常（未能确认唯一内容），已复制，请手动粘贴', true);
+          setStatus('填入异常（未能确认唯一内容或编辑器清不干净），已复制，请手动粘贴', true);
           copyText(text);
         }
       } else {
@@ -1013,7 +1070,7 @@
         } else if (r === 'skip') {
           setStatus('发帖框已包含该内容，未重复填入');
         } else {
-          setStatus('填入异常（未能确认唯一内容），已复制', true);
+          setStatus('填入异常（未能确认唯一内容或编辑器清不干净），已复制', true);
           copyText(text);
         }
       }

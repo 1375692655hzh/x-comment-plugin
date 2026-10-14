@@ -8,3 +8,4 @@ tools/smoke/panel.png
 *.pem
 tools/smoke/keytest/
 tools/smoke/keytest.log
+tools/smoke/profile-dbg/

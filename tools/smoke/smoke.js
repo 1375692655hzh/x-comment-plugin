@@ -429,6 +429,94 @@ const server = http.createServer((req, res) => {
         await page.waitForTimeout(300);
       });
 
+      // v0.5.21 填入第四轮修复回归门禁：用户实测"回复框文案重复两遍还报已自动纠正成功"。
+      // 放在侧栏尺寸断言之后：'已自动纠正'前缀会让状态栏换行、推文框被挤矮（>40px 断言误伤）
+      await step('发送钮慢解禁：轮询等待期内解禁即成功，不误判幽灵走纠正路径', async () => {
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'block';
+          window.__fw.reset();
+          window.__fw.slowBtn(700); // 旧实现固定等 250ms 单查一次：这会误判幽灵→清空重插
+        });
+        await page.locator('.xcc-out').fill('慢解禁回复 slow-btn');
+        await page.locator('.xcc-panel [data-act="insert"]').click();
+        await page.waitForFunction(() => {
+          const b = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-row [data-act="insert"]');
+          return !!(b && !b.disabled);
+        }, null, { timeout: 15000 });
+        const st = await page.evaluate(() => ({
+          text: window.__fw.text(),
+          applied: window.__fw.stats.applied,
+          status: document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-status').textContent
+        }));
+        if (st.text !== '慢解禁回复 slow-btn') throw new Error('state 文本异常: ' + JSON.stringify(st.text));
+        if (st.applied !== 1) throw new Error('插入 ' + st.applied + ' 次（应恰好 1，不应清空重插）');
+        if (st.status.includes('自动纠正')) throw new Error('慢解禁被误判幽灵走了纠正: ' + st.status);
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'none';
+          window.__fw.reset();
+        });
+        return 'ok';
+      });
+
+      await step('清不干净时诚实失败：不往残渣上重插，状态栏走剪贴板指引', async () => {
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'block';
+          window.__fw.reset();
+          window.__fw.setText('残留半截文案 residue-tail'); // 上轮坏版本留下的残渣
+          window.__fw.lockClear(true); // 模拟 X 编辑器清空失败：删除一律被吞
+        });
+        await page.locator('.xcc-out').fill('清不干净回复 no-clear');
+        await page.locator('.xcc-panel [data-act="insert"]').click();
+        await page.waitForFunction(() => {
+          const b = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-row [data-act="insert"]');
+          return !!(b && !b.disabled);
+        }, null, { timeout: 20000 });
+        const st = await page.evaluate(() => ({
+          text: window.__fw.text(),
+          applied: window.__fw.stats.applied,
+          status: document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-status').textContent
+        }));
+        if (st.text !== '残留半截文案 residue-tail') {
+          throw new Error('编辑器被改动（残渣必须原样保留，绝不叠加）: ' + JSON.stringify(st.text));
+        }
+        if (st.applied !== 0) throw new Error('清不干净仍重插了 ' + st.applied + ' 次');
+        if (!st.status.includes('填入异常') || !st.status.includes('手动粘贴')) {
+          throw new Error('未诚实报失败: ' + st.status);
+        }
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'none';
+          window.__fw.reset();
+        });
+        return 'ok';
+      });
+
+      await step('残渣可清时纠正后内容严格一致：恢复产出=目标文本原样（v0.5.21 实锤案例）', async () => {
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'block';
+          window.__fw.reset();
+          window.__fw.setText('互动这事确实得勤快点，不然算法都快忘了我是谁了。'); // 目标文案的后半截残渣
+        });
+        const want = '街溜子已上线，先从你家门口溜达一圈 互动这事确实得勤快点，不然算法都快忘了我是谁了。';
+        await page.locator('.xcc-out').fill(want);
+        await page.locator('.xcc-panel [data-act="insert"]').click();
+        await page.waitForFunction(() => {
+          const b = document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-row [data-act="insert"]');
+          return !!(b && !b.disabled);
+        }, null, { timeout: 15000 });
+        const st = await page.evaluate(() => ({
+          text: window.__fw.text(),
+          status: document.querySelector('#xcc-host').shadowRoot.querySelector('.xcc-status').textContent
+        }));
+        // 旧版在此形态下产出"残渣+完整文案"（恰好一份完整文本）且谎报纠正成功
+        if (st.text !== want) throw new Error('最终内容非严格一致: ' + JSON.stringify(st.text));
+        if (!st.status.includes('已填入')) throw new Error('状态栏异常: ' + st.status);
+        await page.evaluate(() => {
+          document.getElementById('modal').style.display = 'none';
+          window.__fw.reset();
+        });
+        return 'ok';
+      });
+
       await page.screenshot({ path: path.join(here, 'panel.png') });
     }
 

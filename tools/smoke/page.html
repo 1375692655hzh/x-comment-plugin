@@ -79,6 +79,8 @@
     var state = { text: '', sel: 0 };
     var stats = { beforeinput: 0, applied: 0, dropped: 0, paste: 0, rerender: 0 };
     var rendering = false;
+    var slowBtnMs = 0; // >0：发送钮解禁延迟 N ms（模拟 React state→props 慢渲染）
+    var lockClear = false; // true：删除类输入一律丢弃（模拟 X 编辑器清空失败留残渣）
 
     function leaf() { return root.querySelector('span[data-lexical-text="true"]'); }
 
@@ -103,7 +105,14 @@
       sel.removeAllRanges();
       sel.addRange(r);
       var btn = document.querySelector('#modal [data-testid="tweetButton"]');
-      if (btn) btn.disabled = state.text.length === 0; // 发送解禁由 state 驱动
+      if (btn) {
+        if (slowBtnMs > 0 && state.text.length > 0) {
+          btn.disabled = true; // 先压住，慢渲染后再解禁（回调从 state 现算，多计时器幂等）
+          setTimeout(function () { btn.disabled = state.text.length === 0; }, slowBtnMs);
+        } else {
+          btn.disabled = state.text.length === 0; // 发送解禁由 state 驱动
+        }
+      }
       rendering = false;
     }
 
@@ -130,6 +139,7 @@
         render();
       } else if (e.inputType === 'deleteContentBackward') {
         e.preventDefault();
+        if (lockClear) { stats.dropped++; return; } // 模拟清空失败：删除被框架吞掉，文本原样保留
         if (!pt || pt === 0) { stats.dropped++; return; }
         state.text = state.text.slice(0, pt - 1) + state.text.slice(pt);
         state.sel = pt - 1;
@@ -166,9 +176,14 @@
       text: function () { return state.text; },
       canSend: function () { return state.text.length > 0; },
       stats: stats,
+      setText: function (s) { state.text = String(s || ''); state.sel = state.text.length; render(); },
+      slowBtn: function (ms) { slowBtnMs = ms || 0; },
+      lockClear: function (on) { lockClear = !!on; },
       reset: function () {
         state = { text: '', sel: 0 };
         stats.beforeinput = stats.applied = stats.dropped = stats.paste = stats.rerender = 0;
+        slowBtnMs = 0;
+        lockClear = false;
         render();
       }
     };
