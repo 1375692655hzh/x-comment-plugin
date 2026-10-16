@@ -149,6 +149,8 @@
       background: rgba(255,255,255,.05); color: #9ca3af;
     }
     .xcc-stance-btn.on { color: #fff; border-color: #7c8ff5; background: rgba(124,143,245,.18); }
+    /* 语种组与倾向组之间的视觉分隔（v0.5.22，同排不另起行——不动输出框 260px 基线） */
+    .xcc-stance-btn.xcc-lang-sep { margin-left: 10px; }
     input.xcc-target-len { padding: 6px 8px; font-size: 12.5px; height: 30px; }
     .xcc-gen-btn {
       border: none; border-radius: 10px; padding: 9px 0;
@@ -221,6 +223,10 @@
       <button class="xcc-stance-btn" data-act="stance-pessimistic">消极</button>
       <button class="xcc-stance-btn" data-act="stance-objective">客观</button>
       <button class="xcc-stance-btn" data-act="stance-optimistic">乐观</button>
+      <button class="xcc-stance-btn xcc-lang-sep" data-act="lang-zh"
+        title="输出语种：中文。与设置页「语言」同一开关（生成与去AI味改写都跟随）；想改回「跟随推文语言」请到设置页">中文</button>
+      <button class="xcc-stance-btn" data-act="lang-en"
+        title="输出语种：英文。与设置页「语言」同一开关（生成与去AI味改写都跟随）；想改回「跟随推文语言」请到设置页">英文</button>
     </div>
     <div class="xcc-plan-row">
       <button class="xcc-plan-btn" data-act="plan-free">免费 · ≤280 字符</button>
@@ -262,6 +268,7 @@
     personaSel: shadow.querySelector('.xcc-persona'),
     genSel: shadow.querySelector('.xcc-gen'),
     stanceBtns: shadow.querySelectorAll('.xcc-stance-btn'),
+    langBtns: shadow.querySelectorAll('[data-act="lang-zh"], [data-act="lang-en"]'),
     planFree: shadow.querySelector('[data-act="plan-free"]'),
     planPremium: shadow.querySelector('[data-act="plan-premium"]'),
     targetLen: shadow.querySelector('.xcc-target-len'),
@@ -323,6 +330,16 @@
     const v = (state.settings && state.settings.stance) || 'objective';
     els.stanceBtns.forEach((b) => {
       b.classList.toggle('on', b.dataset.act === 'stance-' + v);
+    });
+  }
+
+  // 输出语种渲染（v0.5.22）：中文/英文高亮当前值，与设置页「语言」共用
+  // genParams.language（主生成与去AI味二段都消费它）。'auto' 跟随推文时不设
+  // 高亮——面板按钮只能显式指定中/英，想改回跟随去设置页
+  function renderLang() {
+    const v = state.settings && state.settings.genParams && state.settings.genParams.language;
+    els.langBtns.forEach((b) => {
+      b.classList.toggle('on', b.dataset.act === 'lang-' + v);
     });
   }
 
@@ -427,6 +444,7 @@
       els.update.textContent = '🆕 有新版 v' + upd.latest + '：点击下载 ZIP，解压替换后重新加载扩展';
     }
     renderStance();
+    renderLang();
     renderPlan();
     renderHumanize();
     syncGenBtn();
@@ -1135,6 +1153,15 @@
       renderStance();
       mutateSettings((m) => {
         m.stance = v;
+      }).catch(() => {});
+    } else if (act === 'lang-zh' || act === 'lang-en') {
+      // 输出语种（v0.5.22）：与设置页「语言」共用 genParams.language，合并写
+      // 不整体替换（设置页同款纪律，防抹掉本页无控件的字段）
+      const v = act.slice('lang-'.length);
+      if (state.settings && state.settings.genParams) state.settings.genParams.language = v;
+      renderLang();
+      mutateSettings((m) => {
+        m.genParams.language = v;
       }).catch(() => {});
     } else if (act === 'hum-toggle') {
       // 去AI味开关：本地即时翻转（不等 storage 往返），落盘后 onChanged 会再同步

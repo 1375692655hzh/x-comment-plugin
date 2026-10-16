@@ -343,7 +343,8 @@ function xccPublicSettings(s) {
     genParams: {
       xPlan: s.genParams.xPlan === 'premium' ? 'premium' : 'free', // 脏值一律按 free
       targetLength: String(s.genParams.targetLength || ''),
-      humanize: s.genParams.humanize === 'on' ? 'on' : 'off' // 脏值一律按 off
+      humanize: s.genParams.humanize === 'on' ? 'on' : 'off', // 脏值一律按 off
+      language: ['zh', 'en', 'auto'].includes(s.genParams.language) ? s.genParams.language : 'zh' // v0.5.22 面板语种按钮；脏值一律按 zh
     },
     panelSide: s.panelSide === 'left' ? 'left' : 'right' // 缺省/脏值一律按 right（v0.5.1 起新默认）
   };

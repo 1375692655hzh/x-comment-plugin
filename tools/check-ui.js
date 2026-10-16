@@ -81,6 +81,16 @@ check(
   content.includes('stance-pessimistic') && content.includes('stance-objective') && content.includes('stance-optimistic'),
   '面板存在消极/客观/乐观切换按钮'
 );
+// 5.7b v0.5.22 门禁：面板语种切换（与设置页 #lang 共用 genParams.language）
+check(
+  content.includes('data-act="lang-zh"') && content.includes('data-act="lang-en"'),
+  '面板存在中文/英文语种切换按钮'
+);
+check(content.includes('function renderLang'), '面板有 renderLang 渲染函数（显示严格=存储值）');
+check(
+  content.includes('m.genParams.language = v') && !content.includes('m.genParams = { language'),
+  '面板切语种合并写 genParams.language（不整体替换）'
+);
 
 // 5.7 v0.5.3 门禁：面板顶部模型下拉 + custom 多模型三端联动
 const common = read('shared/common.js');
