@@ -79,15 +79,45 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
   fillProviderForms();
   renderOAuthStatus();
   renderPresets();
+  fillLangSelects();
   $('temp').value = SETTINGS.genParams.temperature;
   $('temp-val').textContent = SETTINGS.genParams.temperature;
   $('maxtok').value = SETTINGS.genParams.maxTokens;
   $('lang').value = SETTINGS.genParams.language;
+  $('ui-lang').value = SETTINGS.uiLanguage || 'zh';
   $('reasoning').value = ['low', 'medium', 'high'].includes(SETTINGS.genParams.reasoningEffort)
     ? SETTINGS.genParams.reasoningEffort
     : 'default';
   $('panel-side').value = SETTINGS.panelSide === 'left' ? 'left' : 'right';
 });
+
+// 语种下拉填充（v0.5.23）：输出语种按注册表渲染；界面语言 = auto + UI 语言候选。
+// 幂等：已有选项时只校正值，供软同步/多入口重复调用
+function fillLangSelects() {
+  const lang = $('lang');
+  if (!lang.options.length) {
+    for (const l of XCC_LANGUAGES) {
+      const o = document.createElement('option');
+      o.value = l.id;
+      o.textContent = l.id === 'auto' ? '跟随推文语言' : l.label;
+      lang.appendChild(o);
+    }
+  }
+  const ui = $('ui-lang');
+  if (!ui.options.length) {
+    const auto = document.createElement('option');
+    auto.value = 'auto';
+    auto.textContent = '跟随浏览器语言';
+    ui.appendChild(auto);
+    for (const id of XCC_UI_LANGS) {
+      const o = document.createElement('option');
+      o.value = id;
+      const e = XCC_LANGUAGES.find((x) => x.id === id);
+      o.textContent = e ? e.label : id;
+      ui.appendChild(o);
+    }
+  }
+}
 
 function toast(msg, isErr) {
   const t = $('toast');
@@ -1002,10 +1032,12 @@ function initBackupUI() {
 // ---------- 生成参数 ----------
 
 function initParamsUI() {
+  fillLangSelects();
   $('temp').value = SETTINGS.genParams.temperature;
   $('temp-val').textContent = SETTINGS.genParams.temperature;
   $('maxtok').value = SETTINGS.genParams.maxTokens;
   $('lang').value = SETTINGS.genParams.language;
+  $('ui-lang').value = SETTINGS.uiLanguage || 'zh';
   $('reasoning').value = ['low', 'medium', 'high'].includes(SETTINGS.genParams.reasoningEffort)
     ? SETTINGS.genParams.reasoningEffort
     : 'default';
@@ -1014,10 +1046,11 @@ function initParamsUI() {
   $('params-save').addEventListener('click', async () => {
     const temp = parseFloat($('temp').value);
     const mt = parseInt($('maxtok').value, 10);
+    const uiLang = $('ui-lang').value;
     const params = {
       temperature: Number.isFinite(temp) ? Math.min(1.5, Math.max(0, temp)) : 0.9,
       maxTokens: Number.isFinite(mt) ? Math.min(2000, Math.max(50, mt)) : 400,
-      language: $('lang').value,
+      language: XCC_LANG_IDS.includes($('lang').value) ? $('lang').value : 'zh',
       reasoningEffort: ['low', 'medium', 'high'].includes($('reasoning').value)
         ? $('reasoning').value
         : 'default'
@@ -1026,6 +1059,7 @@ function initParamsUI() {
       // 合并写而非整体替换：面板侧的免费/付费模式与目标字数（xPlan/targetLength）
       // 在此页无控件，整份覆盖会把它们清掉
       m.genParams = { ...m.genParams, ...params };
+      m.uiLanguage = uiLang === 'auto' || XCC_UI_LANGS.includes(uiLang) ? uiLang : 'zh';
       m.panelSide = $('panel-side').value === 'left' ? 'left' : 'right';
     });
     $('params-status').textContent = '✓ 已保存';

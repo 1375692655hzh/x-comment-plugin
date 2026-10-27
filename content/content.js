@@ -18,6 +18,266 @@
     genCancel: null // 生成中点按钮触发的"放弃等待"回调
   };
 
+  // ---------- 界面文案多语言（v0.5.23） ----------
+
+  // 面板高频文案按 uiLanguage 切换（设置页配置，默认 zh）。zh 条目 = 历史文案
+  // 原样（冒烟断言基准，一字不能差）；{x} 占位符由 T(key, params) 替换。
+  // 长尾排障类错误文案不进表保持中文——面向装机人（中文用户替朋友装机场景）。
+  const XCC_UI_TEXT = {
+    zh: {
+      vendor: '供应商', model: '模型', persona: '人设', style: '生成风格',
+      stanceNeg: '消极', stanceObj: '客观', stancePos: '乐观',
+      langAuto: '跟推文', langTitle: '输出语种：生成回复与去AI味改写都跟随；跟推文=随原推语言',
+      planFree: '免费 · ≤280 字符', planPremium: '付费 · 不限长',
+      targetLenPh: '目标字数（选填，如 120，模糊参考）',
+      captured: '已捕获推文', clearTitle: '清除捕获', captureTitle: '捕获这条推文',
+      captureHint: '把鼠标悬停在任意推文上，点 ✦ 即可捕获',
+      topicPh: '或输入主题（生成原创推文用）',
+      gen: '✦ 生成', genStop: '⏹ 放弃等待',
+      humLabel: '去AI味', humOn: '开', humOff: '关',
+      insert: '填入回复框', copy: '复制', regen: '换一条',
+      outPh: '生成结果（可手动修改后再填入）',
+      settings: '⚙ 设置', closeTitle: '收起面板',
+      countUnit: '字',
+      updBanner: '🆕 有新版 v{v}：点击下载 ZIP，解压替换后重新加载扩展',
+      unreadyTip: '当前接入方式未配置完成（{p}）。点右上角 ⚙ 打开设置完成配置后再生成',
+      whereReply: '回复框', whereDialog: '弹出的回复框', wherePost: '发帖框',
+      stNoContent: '还没有内容可填入',
+      stCopied: '已复制',
+      stCopyFail: '复制失败：剪贴板不可用，请手动全选输出框复制',
+      stGenerating: '正在生成…',
+      stGenWait: '仍在生成中…已耗时 {s} 秒。不想等可点「{stop}」；结果返回后会自动填入',
+      stGenDone: '已生成，可编辑后填入',
+      stGenDoneHum: '已生成（已去AI味），可编辑后填入',
+      stGenDoneHumFail: '已生成，可编辑后填入（去AI味未成功，已用原稿）',
+      stInserted: '✓ 已填入{where}，检查后手动点发送',
+      stInsertedBy: '✓ 已按生成时的推文（{a}）填入{where}，检查后手动发送',
+      stInsertedPost: '✓ 已填入发帖框，检查后手动发送',
+      stAutoCorrected: '已自动纠正一次异常插入，请检查。',
+      stDupSkip: '回复框已包含该内容，未重复填入',
+      stDupSkipPost: '发帖框已包含该内容，未重复填入',
+      stFillFail: '填入异常（未能确认唯一内容或编辑器清不干净），已复制，请手动粘贴',
+      stFillFailPost: '填入异常（未能确认唯一内容或编辑器清不干净），已复制',
+      stNoTweet: '页面上找不到原推文（可能已滚出屏幕），请滚回该推文附近再试',
+      stNoReplyBtn: '找不到该推文的回复按钮',
+      stBoxNotOpen: '回复框未能打开，内容已复制，请手动粘贴',
+      stNoComposer: '未找到发帖输入框：请先打开 X 首页，或手动点开发帖框后重试',
+      stCaptured: '已捕获 {a} 的推文，点「{gen}」',
+      stTweetNoText: '该推文没有可识别的文本（可能只有图片/视频）',
+      stImgOnly: '该推文没有可识别文本（仅图片/视频）：可改为在下方输入主题生成原创推文',
+      stNeedInput: '请先捕获一条推文，或在下方输入主题',
+      stReloaded: '⚠ 扩展已重新加载，请刷新本页（F5）后继续使用',
+      stSettingsFail: '⚠ 设置读取失败：请在扩展管理页点「重新加载」后刷新页面'
+    },
+    en: {
+      vendor: 'Provider', model: 'Model', persona: 'Persona', style: 'Style',
+      stanceNeg: 'Negative', stanceObj: 'Neutral', stancePos: 'Positive',
+      langAuto: 'Auto', langTitle: 'Output language (used for generation and humanize pass); Auto = follow the tweet',
+      planFree: 'Free · ≤280 chars', planPremium: 'Paid · unlimited',
+      targetLenPh: 'Target length (optional, e.g. 120)',
+      captured: 'Captured tweet', clearTitle: 'Clear capture', captureTitle: 'Capture this tweet',
+      captureHint: 'Hover any tweet and click ✦ to capture',
+      topicPh: 'Or type a topic (for original posts)',
+      gen: '✦ Generate', genStop: '⏹ Stop waiting',
+      humLabel: 'Humanize', humOn: 'On', humOff: 'Off',
+      insert: 'Insert', copy: 'Copy', regen: 'Retry',
+      outPh: 'Result (you can edit before inserting)',
+      settings: '⚙ Settings', closeTitle: 'Hide panel',
+      countUnit: ' chars',
+      updBanner: '🆕 New version v{v}: download ZIP, replace files, reload the extension',
+      unreadyTip: 'Current provider is not configured ({p}). Open ⚙ Settings to finish setup first',
+      whereReply: 'the reply box', whereDialog: 'the dialog reply box', wherePost: 'the post box',
+      stNoContent: 'Nothing to insert yet',
+      stCopied: 'Copied',
+      stCopyFail: 'Copy failed: clipboard unavailable, select the output box and copy manually',
+      stGenerating: '⏳ Generating…',
+      stGenWait: 'Still generating… {s}s elapsed. Click "{stop}" to give up; the result will auto-insert when it arrives',
+      stGenDone: 'Generated — edit, then insert',
+      stGenDoneHum: 'Generated (humanized) — edit, then insert',
+      stGenDoneHumFail: 'Generated — edit, then insert (humanize failed, kept draft)',
+      stInserted: '✓ Inserted into {where} — check it, then hit Send yourself',
+      stInsertedBy: '✓ Inserted into {where} for the tweet captured at generation time ({a}) — check, then send',
+      stInsertedPost: '✓ Inserted into the post box — check it, then post',
+      stAutoCorrected: 'Auto-corrected one abnormal insertion, please review. ',
+      stDupSkip: 'The reply box already contains this content — not inserted again',
+      stDupSkipPost: 'The post box already contains this content — not inserted again',
+      stFillFail: 'Insert failed (could not confirm unique content or clear the editor) — copied, please paste manually',
+      stFillFailPost: 'Insert failed (could not confirm unique content or clear the editor) — copied',
+      stNoTweet: 'Original tweet not found on this page (may have scrolled away) — scroll back near it and retry',
+      stNoReplyBtn: 'Reply button not found for this tweet',
+      stBoxNotOpen: 'Reply box failed to open — content copied, please paste manually',
+      stNoComposer: 'Post box not found: open the X home page first, or open the composer and retry',
+      stCaptured: 'Captured a tweet by {a} — click "{gen}"',
+      stTweetNoText: 'This tweet has no recognizable text (maybe only image/video)',
+      stImgOnly: 'No recognizable text (image/video only): type a topic below to generate an original post instead',
+      stNeedInput: 'Capture a tweet first, or type a topic below',
+      stReloaded: '⚠ Extension was reloaded — refresh this page (F5) to continue',
+      stSettingsFail: '⚠ Failed to read settings: click "Reload" on the extensions page, then refresh'
+    },
+    ja: {
+      vendor: 'プロバイダー', model: 'モデル', persona: 'ペルソナ', style: 'スタイル',
+      stanceNeg: '悲観', stanceObj: '客観', stancePos: '楽観',
+      langAuto: 'ツイートに合わせる', langTitle: '出力言語（生成・AI消し両方に適用）。ツイートに合わせる=元ツイートの言語に従う',
+      planFree: '無料 · ≤280字', planPremium: '有料 · 無制限',
+      targetLenPh: '目標文字数（任意・例 120）',
+      captured: '取得済みツイート', clearTitle: '取得を消す', captureTitle: 'このツイートを取得',
+      captureHint: 'ツイートにカーソルを合わせ、✦ をクリックで取得',
+      topicPh: 'またはテーマを入力（オリジナル投稿用）',
+      gen: '✦ 生成', genStop: '⏹ 中止',
+      humLabel: 'AI消し', humOn: '入', humOff: '切',
+      insert: '挿入', copy: 'コピー', regen: 'もう一件',
+      outPh: '生成結果（挿入前に編集できます）',
+      settings: '⚙ 設定', closeTitle: 'パネルを閉じる',
+      countUnit: '文字',
+      updBanner: '🆕 新版 v{v}：ZIP をダウンロード・置換して拡張を再読み込み',
+      unreadyTip: 'プロバイダー未設定（{p}）。右上の ⚙ で設定を完了してください',
+      whereReply: '返信ボックス', whereDialog: 'ダイアログの返信ボックス', wherePost: '投稿ボックス',
+      stNoContent: '挿入する内容がありません',
+      stCopied: 'コピーしました',
+      stCopyFail: 'コピー失敗：クリップボード利用不可。出力欄を手動で全選択してコピーしてください',
+      stGenerating: '⏳ 生成中…',
+      stGenWait: '生成中…{s}秒経過。待ちたくない場合は「{stop}」を押してください。結果は届き次第自動挿入されます',
+      stGenDone: '生成完了 — 編集してから挿入',
+      stGenDoneHum: '生成完了（AI消し済み） — 編集してから挿入',
+      stGenDoneHumFail: '生成完了 — 編集してから挿入（AI消し失敗、初稿を使用）',
+      stInserted: '✓ {where}に挿入しました。確認してから送信してください',
+      stInsertedBy: '✓ 生成時のツイート（{a}）の{where}に挿入しました。確認してから送信',
+      stInsertedPost: '✓ 投稿ボックスに挿入しました。確認してから投稿',
+      stAutoCorrected: '異常挿入を一度自動修正しました。確認してください。 ',
+      stDupSkip: '返信ボックスに同内容が既にあるため、再挿入しません',
+      stDupSkipPost: '投稿ボックスに同内容が既にあるため、再挿入しません',
+      stFillFail: '挿入異常（内容の一意性を確認できないか編集枠を空にできません）— コピー済み、手動貼り付けください',
+      stFillFailPost: '挿入異常（内容の一意性を確認できないか編集枠を空にできません）— コピー済み',
+      stNoTweet: 'ページ上に元ツイートが見つかりません（スクロールアウトした可能性）— 付近まで戻って再試行',
+      stNoReplyBtn: 'このツイートの返信ボタンが見つかりません',
+      stBoxNotOpen: '返信ボックスを開けませんでした — コピー済み、手動貼り付けください',
+      stNoComposer: '投稿入力欄が見つかりません：X ホームを開くか、投稿欄を開いてから再試行',
+      stCaptured: '{a} のツイートを取得しました。「{gen}」を押してください',
+      stTweetNoText: 'このツイートには認識可能なテキストがありません（画像/動画のみの可能性）',
+      stImgOnly: '認識可能なテキストなし（画像/動画のみ）：下のテーマ入力でオリジナル投稿を生成できます',
+      stNeedInput: 'まずツイートを取得するか、下にテーマを入力してください',
+      stReloaded: '⚠ 拡張が再読み込みされました — このページを更新（F5）して続行',
+      stSettingsFail: '⚠ 設定の読み取り失敗：拡張管理ページで「再読み込み」→ ページ更新'
+    },
+    es: {
+      vendor: 'Proveedor', model: 'Modelo', persona: 'Persona', style: 'Estilo',
+      stanceNeg: 'Negativo', stanceObj: 'Neutral', stancePos: 'Positivo',
+      langAuto: 'Seguir al tuit', langTitle: 'Idioma de salida (aplica a generación y reescritura); Seguir = idioma del tuit',
+      planFree: 'Gratis · ≤280', planPremium: 'Premium · ilimitado',
+      targetLenPh: 'Longitud objetivo (opcional, p. ej. 120)',
+      captured: 'Tuit capturado', clearTitle: 'Borrar captura', captureTitle: 'Capturar este tuit',
+      captureHint: 'Pasa el cursor sobre un tuit y pulsa ✦ para capturarlo',
+      topicPh: 'O escribe un tema (para publicaciones propias)',
+      gen: '✦ Generar', genStop: '⏹ Cancelar',
+      humLabel: 'Humanizar', humOn: 'Sí', humOff: 'No',
+      insert: 'Insertar', copy: 'Copiar', regen: 'Otro',
+      outPh: 'Resultado (puedes editarlo antes de insertar)',
+      settings: '⚙ Ajustes', closeTitle: 'Ocultar panel',
+      countUnit: ' car.',
+      updBanner: '🆕 Nueva versión v{v}: descarga el ZIP, reemplaza los archivos y recarga la extensión',
+      unreadyTip: 'Proveedor sin configurar ({p}). Abre ⚙ Ajustes para completarlo',
+      whereReply: 'el cuadro de respuesta', whereDialog: 'el cuadro de respuesta del diálogo', wherePost: 'el cuadro de publicación',
+      stNoContent: 'Aún no hay nada que insertar',
+      stCopied: 'Copiado',
+      stCopyFail: 'Fallo al copiar: portapapeles no disponible; selecciona y copia manualmente',
+      stGenerating: '⏳ Generando…',
+      stGenWait: 'Sigue generando… {s}s transcurridos. Pulsa "{stop}" para cancelar; el resultado se insertará solo al llegar',
+      stGenDone: 'Generado — edítalo e insértalo',
+      stGenDoneHum: 'Generado (humanizado) — edítalo e insértalo',
+      stGenDoneHumFail: 'Generado — edítalo e insértalo (humanizar falló, se usó el borrador)',
+      stInserted: '✓ Insertado en {where} — revísalo y pulsa Enviar tú mismo',
+      stInsertedBy: '✓ Insertado en {where} para el tuit capturado al generar ({a}) — revisa y envía',
+      stInsertedPost: '✓ Insertado en el cuadro de publicación — revísalo y publica',
+      stAutoCorrected: 'Se corrigió automáticamente una inserción anómala; revisa. ',
+      stDupSkip: 'El cuadro de respuesta ya contiene este contenido — no se inserta de nuevo',
+      stDupSkipPost: 'El cuadro de publicación ya contiene este contenido — no se inserta de nuevo',
+      stFillFail: 'Fallo al insertar (contenido no único o editor sin vaciar) — copiado, pégalo manualmente',
+      stFillFailPost: 'Fallo al insertar (contenido no único o editor sin vaciar) — copiado',
+      stNoTweet: 'No se encuentra el tuit original (quizá se desplazó) — vuelve cerca de él y reintenta',
+      stNoReplyBtn: 'No se encontró el botón de responder de este tuit',
+      stBoxNotOpen: 'No se pudo abrir el cuadro de respuesta — copiado, pégalo manualmente',
+      stNoComposer: 'Cuadro de publicación no encontrado: abre el inicio de X o el editor y reintenta',
+      stCaptured: 'Tuit de {a} capturado — pulsa "{gen}"',
+      stTweetNoText: 'Este tuit no tiene texto reconocible (quizá solo imagen/vídeo)',
+      stImgOnly: 'Sin texto reconocible (solo imagen/vídeo): escribe un tema abajo para generar una publicación propia',
+      stNeedInput: 'Captura primero un tuit o escribe un tema abajo',
+      stReloaded: '⚠ La extensión se recargó — actualiza esta página (F5) para continuar',
+      stSettingsFail: '⚠ Error al leer ajustes: pulsa «Recargar» en la página de extensiones y refresca'
+    },
+    de: {
+      vendor: 'Anbieter', model: 'Modell', persona: 'Persona', style: 'Stil',
+      stanceNeg: 'Negativ', stanceObj: 'Neutral', stancePos: 'Positiv',
+      langAuto: 'Wie Tuit', langTitle: 'Ausgabesprache (gilt für Generierung und Umformung); Wie Tuit = Sprache des Tweets',
+      planFree: 'Gratis · ≤280', planPremium: 'Premium · unbegrenzt',
+      targetLenPh: 'Ziellänge (optional, z. B. 120)',
+      captured: 'Erfasster Tweet', clearTitle: 'Erfassung löschen', captureTitle: 'Diesen Tweet erfassen',
+      captureHint: 'Tweet mit der Maus überfahren und ✦ klicken',
+      topicPh: 'Oder Thema eingeben (für eigene Beiträge)',
+      gen: '✦ Erstellen', genStop: '⏹ Abbrechen',
+      humLabel: 'Humanisieren', humOn: 'ein', humOff: 'aus',
+      insert: 'Einfügen', copy: 'Kopieren', regen: 'Neu',
+      outPh: 'Ergebnis (vor dem Einfügen bearbeitbar)',
+      settings: '⚙ Einstellungen', closeTitle: 'Panel ausblenden',
+      countUnit: ' Zeich.',
+      updBanner: '🆕 Neue Version v{v}: ZIP herunterladen, Dateien ersetzen, Erweiterung neu laden',
+      unreadyTip: 'Anbieter nicht konfiguriert ({p}). Zuerst über ⚙ Einstellungen abschließen',
+      whereReply: 'das Antwortfeld', whereDialog: 'das Antwortfeld des Dialogs', wherePost: 'das Beitragsfeld',
+      stNoContent: 'Noch nichts zum Einfügen',
+      stCopied: 'Kopiert',
+      stCopyFail: 'Kopieren fehlgeschlagen: Zwischenablage nicht verfügbar — manuell auswählen und kopieren',
+      stGenerating: '⏳ Generiere…',
+      stGenWait: 'Generiert noch… {s}s vergangen. „{stop}" zum Abbrechen; das Ergebnis wird automatisch eingefügt',
+      stGenDone: 'Erstellt — bearbeiten, dann einfügen',
+      stGenDoneHum: 'Erstellt (humanisiert) — bearbeiten, dann einfügen',
+      stGenDoneHumFail: 'Erstellt — bearbeiten, dann einfügen (Humanisieren fehlgeschlagen, Entwurf verwendet)',
+      stInserted: '✓ In {where} eingefügt — prüfen und selbst senden',
+      stInsertedBy: '✓ In {where} für den beim Generieren erfassten Tweet ({a}) eingefügt — prüfen und senden',
+      stInsertedPost: '✓ Ins Beitragsfeld eingefügt — prüfen und selbst posten',
+      stAutoCorrected: 'Eine fehlerhafte Einfügung wurde automatisch korrigiert — bitte prüfen. ',
+      stDupSkip: 'Das Antwortfeld enthält diesen Inhalt bereits — nicht erneut eingefügt',
+      stDupSkipPost: 'Das Beitragsfeld enthält diesen Inhalt bereits — nicht erneut eingefügt',
+      stFillFail: 'Einfügen fehlgeschlagen (Inhalt nicht eindeutig oder Editor nicht leerbar) — kopiert, manuell einfügen',
+      stFillFailPost: 'Einfügen fehlgeschlagen (Inhalt nicht eindeutig oder Editor nicht leerbar) — kopiert',
+      stNoTweet: 'Original-Tweet nicht auf der Seite (wohl weggerollt) — dorthin zurückscrollen und erneut versuchen',
+      stNoReplyBtn: 'Antworten-Schaltfläche dieses Tweets nicht gefunden',
+      stBoxNotOpen: 'Antwortfeld ließ sich nicht öffnen — kopiert, manuell einfügen',
+      stNoComposer: 'Beitragsfeld nicht gefunden: X-Startseite öffnen oder Verfassen öffnen, dann erneut',
+      stCaptured: 'Tweet von {a} erfasst — „{gen}" klicken',
+      stTweetNoText: 'Dieser Tweet hat keinen erkennbaren Text (evtl. nur Bild/Video)',
+      stImgOnly: 'Kein erkennbarer Text (nur Bild/Video): unten ein Thema eingeben und stattdessen einen eigenen Beitrag erstellen',
+      stNeedInput: 'Zuerst einen Tweet erfassen oder unten ein Thema eingeben',
+      stReloaded: '⚠ Erweiterung wurde neu geladen — Seite aktualisieren (F5) und fortfahren',
+      stSettingsFail: '⚠ Einstellungen nicht lesbar: auf der Erweiterungsseite „Neu laden" klicken, dann aktualisieren'
+    }
+  };
+
+  // 当前界面语言：'auto' 时按浏览器 locale 解析（ja/es/de/en 前缀命中即用，回落 zh）
+  let uiLang = 'zh';
+  function resolveUiLang(pref) {
+    if (pref && pref !== 'auto' && XCC_UI_TEXT[pref]) return pref;
+    if (pref === 'auto') {
+      const langs = (navigator.languages && navigator.languages.length
+        ? navigator.languages
+        : [navigator.language || 'zh']
+      ).map((x) => String(x || '').toLowerCase());
+      for (const l of langs) {
+        const hit = ['ja', 'es', 'de', 'en', 'zh'].find((k) => l === k || l.startsWith(k + '-'));
+        if (hit && XCC_UI_TEXT[hit]) return hit;
+      }
+    }
+    return 'zh';
+  }
+
+  // 取当前界面语言文案；{x} 占位符用 params 替换；缺 key/缺语言回落 zh（冒烟基准）
+  function T(key, params) {
+    let v = XCC_UI_TEXT[uiLang] && XCC_UI_TEXT[uiLang][key];
+    if (v === undefined) v = XCC_UI_TEXT.zh[key];
+    if (params) {
+      for (const k of Object.keys(params)) v = String(v).split('{' + k + '}').join(params[k]);
+    }
+    return v;
+  }
+
   // ---------- 基础工具 ----------
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -149,8 +409,12 @@
       background: rgba(255,255,255,.05); color: #9ca3af;
     }
     .xcc-stance-btn.on { color: #fff; border-color: #7c8ff5; background: rgba(124,143,245,.18); }
-    /* 语种组与倾向组之间的视觉分隔（v0.5.22，同排不另起行——不动输出框 260px 基线） */
-    .xcc-stance-btn.xcc-lang-sep { margin-left: 10px; }
+    /* 语种下拉（v0.5.23 注册表驱动，N 种语言不再用按钮堆）：与倾向按钮同排，
+       借用全局 select 深色底、覆盖成行内紧凑尺寸 */
+    select.xcc-lang {
+      flex: 0 0 116px; width: 116px; padding: 5px 4px; font-size: 12px;
+      border-radius: 9px; border-color: rgba(255,255,255,.16);
+    }
     input.xcc-target-len { padding: 6px 8px; font-size: 12.5px; height: 30px; }
     .xcc-gen-btn {
       border: none; border-radius: 10px; padding: 9px 0;
@@ -200,59 +464,56 @@
   </style>
 
   <button class="xcc-launcher" title="X 评论副驾">✦</button>
-  <div class="xcc-hover-btn" title="捕获这条推文">✦</div>
+  <div class="xcc-hover-btn" title="捕获这条推文" data-i18n-title="captureTitle">✦</div>
 
   <div class="xcc-panel" hidden>
     <div class="xcc-head">
       <span class="xcc-title">✦ 评论副驾</span>
       <span>
-        <button class="xcc-set" data-act="settings" title="打开设置（模型接入 / 提示词 / 生成参数）">⚙ 设置</button>
-        <button class="xcc-mini" data-act="close" title="收起面板">✕</button>
+        <button class="xcc-set" data-act="settings" title="打开设置（模型接入 / 提示词 / 生成参数）" data-i18n="settings">⚙ 设置</button>
+        <button class="xcc-mini" data-act="close" title="收起面板" data-i18n-title="closeTitle">✕</button>
       </span>
     </div>
-    <label class="xcc-lb">供应商</label>
+    <label class="xcc-lb" data-i18n="vendor">供应商</label>
     <select class="xcc-vendor" title="当前供应商，切换即生效；新增供应商与配置请到设置页"></select>
-    <label class="xcc-lb">模型</label>
+    <label class="xcc-lb" data-i18n="model">模型</label>
     <select class="xcc-model" title="当前供应商的可用模型，切换即生效；完整列表与自定义 ID 请到设置页"></select>
     <div class="xcc-update" hidden>🆕 有新版</div>
-    <label class="xcc-lb">人设</label>
+    <label class="xcc-lb" data-i18n="persona">人设</label>
     <select class="xcc-persona"></select>
-    <label class="xcc-lb">生成风格</label>
+    <label class="xcc-lb" data-i18n="style">生成风格</label>
     <select class="xcc-gen"></select>
     <div class="xcc-stance-row">
-      <button class="xcc-stance-btn" data-act="stance-pessimistic">消极</button>
-      <button class="xcc-stance-btn" data-act="stance-objective">客观</button>
-      <button class="xcc-stance-btn" data-act="stance-optimistic">乐观</button>
-      <button class="xcc-stance-btn xcc-lang-sep" data-act="lang-zh"
-        title="输出语种：中文。与设置页「语言」同一开关（生成与去AI味改写都跟随）；想改回「跟随推文语言」请到设置页">中文</button>
-      <button class="xcc-stance-btn" data-act="lang-en"
-        title="输出语种：英文。与设置页「语言」同一开关（生成与去AI味改写都跟随）；想改回「跟随推文语言」请到设置页">英文</button>
+      <button class="xcc-stance-btn" data-act="stance-pessimistic" data-i18n="stanceNeg">消极</button>
+      <button class="xcc-stance-btn" data-act="stance-objective" data-i18n="stanceObj">客观</button>
+      <button class="xcc-stance-btn" data-act="stance-optimistic" data-i18n="stancePos">乐观</button>
+      <select class="xcc-lang" title="输出语种"></select>
     </div>
     <div class="xcc-plan-row">
-      <button class="xcc-plan-btn" data-act="plan-free">免费 · ≤280 字符</button>
-      <button class="xcc-plan-btn" data-act="plan-premium">付费 · 不限长</button>
+      <button class="xcc-plan-btn" data-act="plan-free" data-i18n="planFree">免费 · ≤280 字符</button>
+      <button class="xcc-plan-btn" data-act="plan-premium" data-i18n="planPremium">付费 · 不限长</button>
     </div>
     <input class="xcc-target-len" type="number" min="1" max="2000"
-      placeholder="目标字数（选填，如 120，模糊参考）" hidden>
+      placeholder="目标字数（选填，如 120，模糊参考）" data-i18n-ph="targetLenPh" hidden>
     <div class="xcc-tweet">
       <div class="xcc-tweet-hd">
-        <span>已捕获推文</span>
-        <button class="xcc-mini" data-act="clear" title="清除捕获">✕</button>
+        <span data-i18n="captured">已捕获推文</span>
+        <button class="xcc-mini" data-act="clear" title="清除捕获" data-i18n-title="clearTitle">✕</button>
       </div>
       <div class="xcc-tweet-bd">把鼠标悬停在任意推文上，点 ✦ 即可捕获</div>
     </div>
-    <input class="xcc-topic" placeholder="或输入主题（生成原创推文用）">
-    <button class="xcc-gen-btn">✦ 生成</button>
+    <input class="xcc-topic" placeholder="或输入主题（生成原创推文用）" data-i18n-ph="topicPh">
+    <button class="xcc-gen-btn" data-i18n="gen">✦ 生成</button>
     <div class="xcc-out-bar">
       <button class="xcc-hum" data-act="hum-toggle"
         title="去AI味：开启后每次生成会先出初稿、再自动走一遍「人味改写」（更像真人随手发的，AI 味更少）。代价：耗时与额度翻倍">去AI味：关</button>
       <span class="xcc-count">0/280</span>
     </div>
-    <textarea class="xcc-out" placeholder="生成结果（可手动修改后再填入）"></textarea>
+    <textarea class="xcc-out" placeholder="生成结果（可手动修改后再填入）" data-i18n-ph="outPh"></textarea>
     <div class="xcc-row">
-      <button class="xcc-main" data-act="insert">填入回复框</button>
-      <button data-act="copy">复制</button>
-      <button data-act="regen">换一条</button>
+      <button class="xcc-main" data-act="insert" data-i18n="insert">填入回复框</button>
+      <button data-act="copy" data-i18n="copy">复制</button>
+      <button data-act="regen" data-i18n="regen">换一条</button>
     </div>
     <div class="xcc-status"></div>
   </div>`;
@@ -268,7 +529,7 @@
     personaSel: shadow.querySelector('.xcc-persona'),
     genSel: shadow.querySelector('.xcc-gen'),
     stanceBtns: shadow.querySelectorAll('.xcc-stance-btn'),
-    langBtns: shadow.querySelectorAll('[data-act="lang-zh"], [data-act="lang-en"]'),
+    langSel: shadow.querySelector('.xcc-lang'),
     planFree: shadow.querySelector('[data-act="plan-free"]'),
     planPremium: shadow.querySelector('[data-act="plan-premium"]'),
     targetLen: shadow.querySelector('.xcc-target-len'),
@@ -295,7 +556,7 @@
       els.tweetBd.textContent =
         (c.author || c.name || '') + '：' + (c.text || '（无文本，仅图片/视频）');
     } else {
-      els.tweetBd.textContent = '把鼠标悬停在任意推文上，点 ✦ 即可捕获';
+      els.tweetBd.textContent = T('captureHint');
     }
   }
 
@@ -321,8 +582,7 @@
     els.genBtn.disabled = !state.generating && !ready;
     els.genBtn.title = ready
       ? ''
-      : '当前接入方式未配置完成（' + (s ? s.providerLabel : '模型') +
-        '）。点右上角 ⚙ 打开设置完成配置后再生成';
+      : T('unreadyTip', { p: s ? s.providerLabel : T('model') });
   }
 
   // 观点倾向渲染：消极/客观/乐观三按钮高亮当前值
@@ -333,14 +593,52 @@
     });
   }
 
-  // 输出语种渲染（v0.5.22）：中文/英文高亮当前值，与设置页「语言」共用
-  // genParams.language（主生成与去AI味二段都消费它）。'auto' 跟随推文时不设
-  // 高亮——面板按钮只能显式指定中/英，想改回跟随去设置页
-  function renderLang() {
-    const v = state.settings && state.settings.genParams && state.settings.genParams.language;
-    els.langBtns.forEach((b) => {
-      b.classList.toggle('on', b.dataset.act === 'lang-' + v);
+  // 界面语言应用（v0.5.23）：data-i18n/-ph/-title 三属性批量刷文案 + 语言相关的
+  // 动态渲染刷新。语言未变时跳过（applySettings 每次存储变更都会跑）
+  function applyUiLang(pref) {
+    const next = resolveUiLang(pref);
+    const changed = next !== uiLang;
+    uiLang = next;
+    shadow.querySelectorAll('[data-i18n]').forEach((el) => {
+      el.textContent = T(el.getAttribute('data-i18n'));
     });
+    shadow.querySelectorAll('[data-i18n-ph]').forEach((el) => {
+      el.placeholder = T(el.getAttribute('data-i18n-ph'));
+    });
+    shadow.querySelectorAll('[data-i18n-title]').forEach((el) => {
+      el.title = T(el.getAttribute('data-i18n-title'));
+    });
+    if (changed || !els.tweetBd.textContent) {
+      if (!state.captured) els.tweetBd.textContent = T('captureHint');
+    }
+    if (state.settings) {
+      renderLang();
+      renderHumanize();
+      updateCount();
+      if (!state.generating) els.genBtn.textContent = T('gen');
+    }
+  }
+
+  // 输出语种渲染（v0.5.23 注册表）：选项按 XCC_LANGUAGES 生成，auto 用界面语言
+  // 文案、其余用自称；选中值严格 = 存储的 genParams.language（显示≠实际零容忍）
+  function renderLang() {
+    if (!els.langSel) return;
+    const cur = state.settings && state.settings.genParams && state.settings.genParams.language;
+    const want = XCC_LANG_IDS.includes(cur) ? cur : 'zh';
+    if (!els.langSel.options.length || els.langSel.options.length !== XCC_LANGUAGES.length) {
+      els.langSel.textContent = '';
+      for (const l of XCC_LANGUAGES) {
+        const o = document.createElement('option');
+        o.value = l.id;
+        o.textContent = l.id === 'auto' ? T('langAuto') : l.label;
+        els.langSel.appendChild(o);
+      }
+      els.langSel.title = T('langTitle');
+    } else {
+      els.langSel.options[0].textContent = T('langAuto'); // auto 标签随界面语言
+      els.langSel.title = T('langTitle');
+    }
+    els.langSel.value = want;
   }
 
   // 账号模式渲染：免费/付费按钮态 + 目标字数输入框显隐 + 计数器刷新
@@ -362,7 +660,7 @@
   function renderHumanize() {
     if (!els.hum) return;
     const on = !!(state.settings && state.settings.genParams && state.settings.genParams.humanize === 'on');
-    els.hum.textContent = '去AI味：' + (on ? '开' : '关');
+    els.hum.textContent = T('humLabel') + '：' + (on ? T('humOn') : T('humOff'));
     els.hum.classList.toggle('on', on);
   }
 
@@ -372,7 +670,7 @@
     const gp = (state.settings && state.settings.genParams) || {};
     const n = els.out.value.length;
     if (gp.xPlan === 'premium') {
-      els.count.textContent = n + ' 字';
+      els.count.textContent = n + T('countUnit');
       els.count.classList.remove('over');
     } else {
       els.count.textContent = n + '/280';
@@ -435,13 +733,15 @@
     fillSelect(els.genSel, pub.genPresets, pub.activeGenId);
     renderVendors();
     renderModels();
+    // 界面语言（v0.5.23）：设置页可切 auto/zh/ja/es/de/en，面板文案整批跟换
+    applyUiLang(pub.uiLanguage);
     // 同设置页：现场用已装版本重算，不用存储里的旧结论
     const upd = pub.update;
     const installed = chrome.runtime.getManifest().version;
     const show = !!(upd && upd.latest && xccIsNewerVersion(upd.latest, installed));
     els.update.hidden = !show;
     if (show) {
-      els.update.textContent = '🆕 有新版 v' + upd.latest + '：点击下载 ZIP，解压替换后重新加载扩展';
+      els.update.textContent = T('updBanner', { v: upd.latest });
     }
     renderStance();
     renderLang();
@@ -464,12 +764,12 @@
     } catch (e) {
       if (!(chrome.runtime && chrome.runtime.id)) {
         // 本内容脚本属于重载前的旧实例：storage 已不可用，停止重试
-        setStatus('⚠ 扩展已重新加载，请刷新本页（F5）后继续使用', true);
+        setStatus(T('stReloaded'), true);
         syncGenBtn();
         return;
       }
       if (!state.settings) {
-        setStatus('⚠ 设置读取失败：请在扩展管理页点「重新加载」后刷新页面', true);
+        setStatus(T('stSettingsFail'), true);
         setTimeout(refreshSettings, 5000);
       }
     }
@@ -569,9 +869,9 @@
     state.captured = t;
     renderTweetBox();
     if (!t.text) {
-      setStatus('该推文没有可识别的文本（可能只有图片/视频）', true);
+      setStatus(T('stTweetNoText'), true);
     } else {
-      setStatus('已捕获 ' + (t.author || '') + ' 的推文，点「✦ 生成」');
+      setStatus(T('stCaptured', { a: t.author || '', gen: T('gen') }));
     }
   }
 
@@ -593,15 +893,15 @@
     if (!hasTweetText && !topic) {
       setStatus(
         state.captured
-          ? '该推文没有可识别文本（仅图片/视频）：可改为在下方输入主题生成原创推文'
-          : '请先捕获一条推文，或在下方输入主题',
+          ? T('stImgOnly')
+          : T('stNeedInput'),
         true
       );
       return;
     }
     state.generating = true;
-    els.genBtn.textContent = '⏹ 放弃等待';
-    setStatus('正在生成…');
+    els.genBtn.textContent = T('genStop');
+    setStatus(T('stGenerating'));
     // 快照本次生成的目标推文：填入时绑定它，
     // 避免生成等待期间误触捕获其他推文导致回错帖
     const target = state.captured;
@@ -615,7 +915,7 @@
     const ticker = setInterval(() => {
       elapsed += 15;
       setStatus(
-        '仍在生成中…已耗时 ' + elapsed + ' 秒。不想等可点「⏹ 放弃等待」；结果返回后会自动填入'
+        T('stGenWait', { s: elapsed, stop: T('genStop') })
       );
     }, 15000);
     try {
@@ -632,10 +932,10 @@
         state.generatedFor = target;
         setStatus(
           r.humanized
-            ? '已生成（已去AI味），可编辑后填入'
+            ? T('stGenDoneHum')
             : r.humanizeError
-              ? '已生成，可编辑后填入（去AI味未成功，已用原稿）'
-              : '已生成，可编辑后填入'
+              ? T('stGenDoneHumFail')
+              : T('stGenDone')
         );
         updateCount();
       } else if (!r) {
@@ -656,7 +956,7 @@
       state.generating = false;
       state.genCancel = null;
       syncGenBtn(); // 不再无条件解禁：若配置仍为空则保持禁用
-      els.genBtn.textContent = '✦ 生成';
+      els.genBtn.textContent = T('gen');
     }
   }
 
@@ -1002,7 +1302,7 @@
     if (state.inserting) return;
     const text = els.out.value.trim();
     if (!text) {
-      setStatus('还没有内容可填入', true);
+      setStatus(T('stNoContent'), true);
       return;
     }
     state.inserting = true;
@@ -1017,7 +1317,7 @@
           (e) => countOccurrences(normEditorText(e.innerText), normEditorText(text)) > 0
         );
         if (dup) {
-          setStatus('回复框已包含该内容，未重复填入');
+          setStatus(T('stDupSkip'));
           return;
         }
         // v0.5.5：已有打开且正对目标推文的回复框 → 直接填入，不再点回复按钮开新框。
@@ -1029,19 +1329,19 @@
           // 回复模式：找到原推文 → 点回复按钮 → 等编辑器出现 → 写入
           const art = findArticleByHref(target.href);
           if (!art) {
-            setStatus('页面上找不到原推文（可能已滚出屏幕），请滚回该推文附近再试', true);
+            setStatus(T('stNoTweet'), true);
             return;
           }
           const replyBtn = art.querySelector('[data-testid="reply"]');
           if (!replyBtn) {
-            setStatus('找不到该推文的回复按钮', true);
+            setStatus(T('stNoReplyBtn'), true);
             return;
           }
           const before = new Set(visibleEditors());
           replyBtn.click();
           editor = await waitForNewEditor(before, 6000);
           if (!editor) {
-            setStatus('回复框未能打开，内容已复制，请手动粘贴', true);
+            setStatus(T('stBoxNotOpen'), true);
             copyText(text);
             return;
           }
@@ -1052,19 +1352,20 @@
           }
         }
         const r = await insertInto(editor, text);
-        const where =
-          editor && editor.closest && editor.closest('[role="dialog"]') ? '弹出的回复框' : '回复框';
+        const where = T(
+          editor && editor.closest && editor.closest('[role="dialog"]') ? 'whereDialog' : 'whereReply'
+        );
         if (r === 'ok' || r === 'recovered') {
           setStatus(
-            (r === 'recovered' ? '已自动纠正一次异常插入，请检查。' : '') +
+            (r === 'recovered' ? T('stAutoCorrected') : '') +
               (target !== state.captured
-                ? '✓ 已按生成时的推文（' + (target.author || '') + '）填入' + where + '，检查后手动发送'
-                : '✓ 已填入' + where + '，检查后手动点发送')
+                ? T('stInsertedBy', { a: target.author || '', where })
+                : T('stInserted', { where }))
           );
         } else if (r === 'skip') {
-          setStatus('回复框已包含该内容，未重复填入');
+          setStatus(T('stDupSkip'));
         } else {
-          setStatus('填入异常（未能确认唯一内容或编辑器清不干净），已复制，请手动粘贴', true);
+          setStatus(T('stFillFail'), true);
           copyText(text);
         }
       } else {
@@ -1079,18 +1380,18 @@
           }
         }
         if (!editor) {
-          setStatus('未找到发帖输入框：请先打开 X 首页，或手动点开发帖框后重试', true);
+          setStatus(T('stNoComposer'), true);
           return;
         }
         const r = await insertInto(editor, text);
         if (r === 'ok' || r === 'recovered') {
-          setStatus((r === 'recovered' ? '已自动纠正一次异常插入，请检查。' : '') + '✓ 已填入发帖框，检查后手动发送');
+          setStatus((r === 'recovered' ? T('stAutoCorrected') : '') + T('stInsertedPost'));
         } else if (r === 'skip') {
-          setStatus('发帖框已包含该内容，未重复填入');
+          setStatus(T('stDupSkipPost'));
         } else {
-          setStatus('填入异常（未能确认唯一内容或编辑器清不干净），已复制', true);
+          setStatus(T('stFillFailPost'), true);
           copyText(text);
-        }
+       }
       }
     } finally {
       state.inserting = false;
@@ -1136,7 +1437,7 @@
       insertResult();
     } else if (act === 'copy') {
       const ok = await copyText(els.out.value);
-      setStatus(ok ? '已复制' : '复制失败：剪贴板不可用，请手动全选输出框复制', !ok);
+      setStatus(ok ? T('stCopied') : T('stCopyFail'), !ok);
     } else if (act === 'regen') {
       generate();
     } else if (act === 'plan-free' || act === 'plan-premium') {
@@ -1153,15 +1454,6 @@
       renderStance();
       mutateSettings((m) => {
         m.stance = v;
-      }).catch(() => {});
-    } else if (act === 'lang-zh' || act === 'lang-en') {
-      // 输出语种（v0.5.22）：与设置页「语言」共用 genParams.language，合并写
-      // 不整体替换（设置页同款纪律，防抹掉本页无控件的字段）
-      const v = act.slice('lang-'.length);
-      if (state.settings && state.settings.genParams) state.settings.genParams.language = v;
-      renderLang();
-      mutateSettings((m) => {
-        m.genParams.language = v;
       }).catch(() => {});
     } else if (act === 'hum-toggle') {
       // 去AI味开关：本地即时翻转（不等 storage 往返），落盘后 onChanged 会再同步
@@ -1184,6 +1476,15 @@
     const v = els.genSel.value;
     mutateSettings((m) => {
       m.activeGenId = v;
+    }).catch(() => {});
+  });
+  // 输出语种（v0.5.23 注册表下拉）：与设置页「语言」共用 genParams.language，合并写
+  els.langSel.addEventListener('change', () => {
+    const v = els.langSel.value;
+    if (!XCC_LANG_IDS.includes(v)) return;
+    if (state.settings && state.settings.genParams) state.settings.genParams.language = v;
+    mutateSettings((m) => {
+      m.genParams.language = v;
     }).catch(() => {});
   });
 

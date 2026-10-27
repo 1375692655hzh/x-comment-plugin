@@ -81,17 +81,6 @@ check(
   content.includes('stance-pessimistic') && content.includes('stance-objective') && content.includes('stance-optimistic'),
   '面板存在消极/客观/乐观切换按钮'
 );
-// 5.7b v0.5.22 门禁：面板语种切换（与设置页 #lang 共用 genParams.language）
-check(
-  content.includes('data-act="lang-zh"') && content.includes('data-act="lang-en"'),
-  '面板存在中文/英文语种切换按钮'
-);
-check(content.includes('function renderLang'), '面板有 renderLang 渲染函数（显示严格=存储值）');
-check(
-  content.includes('m.genParams.language = v') && !content.includes('m.genParams = { language'),
-  '面板切语种合并写 genParams.language（不整体替换）'
-);
-
 // 5.7 v0.5.3 门禁：面板顶部模型下拉 + custom 多模型三端联动
 const common = read('shared/common.js');
 check(content.includes('xcc-model'), '面板存在模型下拉 .xcc-model');
@@ -100,6 +89,23 @@ check(content.includes('m.xai.model = v'), '面板切换模型写 xai.model');
 check(content.includes('m.custom.model = v'), '面板切换模型写 custom.model');
 check(content.includes('m.grokOAuth.model = v'), '面板切换模型写 grokOAuth.model');
 check(common.includes('XCC_XAI_MODEL_CANDIDATES'), 'common.js 定义 xai 候选常量（面板/设置页共用）');
+
+// 5.7b v0.5.23 门禁：语种注册表（多语种）+ 面板语种下拉 + 界面语言
+check(common.includes('XCC_LANGUAGES'), 'common.js 存在语种注册表 XCC_LANGUAGES');
+for (const id of ["'ja'", "'es'", "'de'"]) {
+  check(common.includes('id: ' + id), '注册表含语种 ' + id);
+}
+check(sw.includes('xccLangEntry('), 'SW 注入语种指令走注册表查找（两处 if/else 已除名）');
+check(content.includes('select class="xcc-lang"'), '面板语种为下拉（注册表驱动，非按钮堆）');
+check(content.includes('function renderLang'), '面板有 renderLang 渲染函数（显示严格=存储值）');
+check(
+  content.includes('m.genParams.language = v') && !content.includes('m.genParams = { language'),
+  '面板切语种合并写 genParams.language（不整体替换）'
+);
+check(content.includes('XCC_UI_TEXT') && content.includes('function T(key, params)'), '面板界面文案多语言表与 T() 存在');
+check(common.includes('XCC_UI_LANGS'), 'common.js 定义界面语言候选 XCC_UI_LANGS');
+check(oh.includes('id="ui-lang"'), '设置页存在界面语言下拉');
+
 check(common.includes('XCC_OAUTH_MODEL_FALLBACK'), 'common.js 定义 oauth 兜底候选（面板共用）');
 check(!oj.includes('const XCC_OAUTH_MODEL_FALLBACK'), 'options.js 不重复声明兜底常量（防经典 script 共享全局 SyntaxError）');
 check(/models:\s*\[/.test(common.split('custom:')[1] || ''), 'XCC_DEFAULTS.custom 含 models 数组');

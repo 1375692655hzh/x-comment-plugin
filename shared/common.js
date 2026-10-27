@@ -24,6 +24,44 @@ const XCC_OAUTH_MODEL_FALLBACK = [
   'grok-code-fast-1'
 ];
 
+// 输出语种注册表（v0.5.23 多语种）：三端单一事实源——SW 注入指令、设置页/面板
+// 下拉选项、归一化校验全部查这张表，加一门语言 = 加一行。
+// 指令文本用目标语言本身写（模型遵从度更好）；hum = 去 AI 味二段改写的语言保持指令。
+// 'auto' 跟随推文语言：不注入任何指令。label 用自称（autonym），任何界面语言下都显示原文。
+const XCC_LANGUAGES = [
+  { id: 'auto', label: '跟推文' },
+  { id: 'zh', label: '中文', directive: '务必使用中文撰写。', hum: '保持中文。' },
+  { id: 'en', label: 'English', directive: 'Always write in English.', hum: 'Keep it in English.' },
+  {
+    id: 'ja',
+    label: '日本語',
+    directive: '必ず日本語で書いてください。',
+    hum: '日本語のままにしてください。'
+  },
+  {
+    id: 'es',
+    label: 'Español',
+    directive: 'Escribe siempre en español.',
+    hum: 'Mantén el español.'
+  },
+  {
+    id: 'de',
+    label: 'Deutsch',
+    directive: 'Schreibe immer auf Deutsch.',
+    hum: 'Behalte das Deutsch bei.'
+  }
+];
+const XCC_LANG_IDS = XCC_LANGUAGES.map((l) => l.id);
+
+// 界面语言候选（面板文案切换，v0.5.23）：'auto' 跟随浏览器 locale（匹配不到回落 zh）。
+// 输出语种（上表）与界面语言是两回事：前者管生成回复用什么语言，后者管面板按钮文案。
+const XCC_UI_LANGS = ['zh', 'en', 'ja', 'es', 'de'];
+
+// 语种 id → 注册表条目；'auto'/未知返回 null（调用方不注入指令）
+function xccLangEntry(id) {
+  return XCC_LANGUAGES.find((l) => l.id === id && l.directive) || null;
+}
+
 const XCC_DEFAULTS = {
   enabled: true,
   provider: 'xai', // 'xai' | 'custom' | 'grok-oauth'
@@ -121,7 +159,7 @@ const XCC_DEFAULTS = {
     temperature: 0.9,
     // v0.5.11 起 1000（旧默认 400 对推理模型偏小，用户定 1000）
     maxTokens: 1000,
-    // v0.5.11 起默认强制中文（旧默认 'auto' 跟随推文语言）；'en' 强制英文
+    // v0.5.11 起默认强制中文；v0.5.23 起取值 = XCC_LANGUAGES 注册表（auto/zh/en/ja/es/de）
     language: 'zh',
     // 思考强度：'default' 不发送该参数（对不支持的端点零影响）| 'low' | 'medium' | 'high'
     reasoningEffort: 'default',
@@ -132,6 +170,11 @@ const XCC_DEFAULTS = {
     // 与 Humanizer-zh 的 AI 痕迹清单）。代价 = 每次生成两次请求；脏值一律按 off
     humanize: 'off'
   },
+
+  // 界面语言（v0.5.23）：面板文案用哪种语言。'auto' 跟随浏览器 locale；默认 'zh'
+  // （分发模型是中文用户替朋友装机，朋友机器由装机人显式设置；auto 会翻掉冒烟的
+  // 中文断言基准，故不做默认）。设置页本身保持中文。
+  uiLanguage: 'zh',
 
   // 面板停靠侧：'left' | 'right'（全高侧边栏形态，v0.5.1 起默认右侧）
   panelSide: 'right',
@@ -237,6 +280,11 @@ function xccMergeSettings(saved) {
     activePersonaId = personaPresets[0].id;
   }
   if (!genPresets.some((g) => g.id === activeGenId)) activeGenId = genPresets[0].id;
+  // v0.5.23 多语种：language 脏值（不在注册表内）收敛为 zh；合法值含 'auto' 原样放行
+  if (!XCC_LANG_IDS.includes(genParams.language)) genParams.language = 'zh';
+  // 界面语言：'auto'（跟随浏览器）或 XCC_UI_LANGS 之一，脏值一律按 zh
+  const uiLanguage =
+    s.uiLanguage === 'auto' || XCC_UI_LANGS.includes(s.uiLanguage) ? s.uiLanguage : 'zh';
   return {
     ...XCC_DEFAULTS,
     ...s,
@@ -246,6 +294,7 @@ function xccMergeSettings(saved) {
     activeCustomVendorId,
     grokOAuth,
     genParams,
+    uiLanguage,
     personaPresets,
     genPresets,
     activePersonaId,
@@ -344,8 +393,9 @@ function xccPublicSettings(s) {
       xPlan: s.genParams.xPlan === 'premium' ? 'premium' : 'free', // 脏值一律按 free
       targetLength: String(s.genParams.targetLength || ''),
       humanize: s.genParams.humanize === 'on' ? 'on' : 'off', // 脏值一律按 off
-      language: ['zh', 'en', 'auto'].includes(s.genParams.language) ? s.genParams.language : 'zh' // v0.5.22 面板语种按钮；脏值一律按 zh
+      language: XCC_LANG_IDS.includes(s.genParams.language) ? s.genParams.language : 'zh' // v0.5.23 查注册表；脏值一律按 zh
     },
+    uiLanguage: s.uiLanguage === 'auto' || XCC_UI_LANGS.includes(s.uiLanguage) ? s.uiLanguage : 'zh',
     panelSide: s.panelSide === 'left' ? 'left' : 'right' // 缺省/脏值一律按 right（v0.5.1 起新默认）
   };
 }

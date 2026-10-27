@@ -649,47 +649,106 @@ const server = http.createServer((req, res) => {
       }
     });
 
-    // v0.5.22 面板语种切换：按钮与存储/设置页三联动，生成 system 注入英文指令
-    await step('面板语种切换：英文注入指令+落盘+设置页联动（收尾恢复中文）', async () => {
+    // v0.5.23 面板语种下拉（注册表驱动）：落盘/设置页联动/生成注入指令三验
+    const langE2E = async (langId, expectInSys) => {
+      await page.bringToFront();
+      await page.locator('.xcc-panel .xcc-lang').selectOption(langId);
+      await page.waitForTimeout(700);
+      // ⚠ 主世界 evaluate 无 chrome.storage，读存储必须走扩展页（v0.5.0 教训）
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      if (!optsPage) throw new Error('options 页未打开（步骤顺序错误）');
+      const saved = await optsPage.evaluate(async () => {
+        const { settings } = await chrome.storage.local.get('settings');
+        return settings.genParams && settings.genParams.language;
+      });
+      if (saved !== langId) throw new Error('面板语种未落盘: ' + JSON.stringify(saved));
+      const panelVal = await page.locator('.xcc-panel .xcc-lang').inputValue();
+      if (panelVal !== langId) throw new Error('面板下拉显示≠实际: ' + panelVal);
+      // 设置页软同步（v0.5.17 onChanged 重渲染）：#lang 跟到目标语种
+      const langSel = await optsPage.locator('#lang').inputValue();
+      if (langSel !== langId) throw new Error('设置页 #lang 未联动: ' + langSel);
+      // 生成端到端：system 注入目标语种硬约束
+      const before = mockLLM.count;
+      await page.locator('.xcc-panel [data-act="regen"]').click();
+      const t0 = Date.now();
+      while (Date.now() - t0 < 15000 && mockLLM.count < before + 1) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (mockLLM.count < before + 1) throw new Error('请求未到达');
+      const body = JSON.parse(mockLLM.lastBody || '{}');
+      const sys = body.messages && body.messages[0] && body.messages[0].content;
+      if (!String(sys).includes(expectInSys)) {
+        throw new Error('system 未注入语种指令: ' + JSON.stringify(String(sys).slice(-80)));
+      }
+    };
+    await step('面板语种下拉：英文注入指令+落盘+设置页联动（收尾恢复中文）', async () => {
       try {
-        await page.bringToFront();
-        // 初始态：默认中文高亮
-        const zhOn = await page.locator('.xcc-panel [data-act="lang-zh"]').evaluate((b) => b.classList.contains('on'));
-        if (!zhOn) throw new Error('初始中文按钮未高亮（默认 genParams.language=zh）');
-        await page.locator('.xcc-panel [data-act="lang-en"]').click();
-        await page.waitForTimeout(700);
-        // ⚠ 主世界 evaluate 无 chrome.storage，读存储必须走扩展页（v0.5.0 教训）
-        const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
-        if (!optsPage) throw new Error('options 页未打开（步骤顺序错误）');
-        const saved = await optsPage.evaluate(async () => {
-          const { settings } = await chrome.storage.local.get('settings');
-          return settings.genParams && settings.genParams.language;
-        });
-        if (saved !== 'en') throw new Error('面板点英文未落盘: ' + JSON.stringify(saved));
-        // 按钮高亮切换：英文亮、中文灭
-        const enOn = await page.locator('.xcc-panel [data-act="lang-en"]').evaluate((b) => b.classList.contains('on'));
-        const zhOff = await page.locator('.xcc-panel [data-act="lang-zh"]').evaluate((b) => !b.classList.contains('on'));
-        if (!enOn || !zhOff) throw new Error('语种按钮高亮未切换');
-        // 设置页软同步（v0.5.17 onChanged 重渲染）：#lang 跟到 en
-        const langSel = await optsPage.locator('#lang').inputValue();
-        if (langSel !== 'en') throw new Error('设置页 #lang 未联动: ' + langSel);
-        // 生成端到端：system 含英文硬约束
-        const before = mockLLM.count;
-        await page.locator('.xcc-panel [data-act="regen"]').click();
-        const t0 = Date.now();
-        while (Date.now() - t0 < 15000 && mockLLM.count < before + 1) {
-          await new Promise((r) => setTimeout(r, 200));
-        }
-        if (mockLLM.count < before + 1) throw new Error('请求未到达');
-        const body = JSON.parse(mockLLM.lastBody || '{}');
-        const sys = body.messages && body.messages[0] && body.messages[0].content;
-        if (!String(sys).includes('Always write in English')) {
-          throw new Error('system 未注入英文指令: ' + JSON.stringify(String(sys).slice(-80)));
-        }
+        // 初始态：默认中文选中
+        const initVal = await page.locator('.xcc-panel .xcc-lang').inputValue();
+        if (initVal !== 'zh') throw new Error('初始语种非 zh（默认 genParams.language=zh）: ' + initVal);
+        // 注册表选项数 = XCC_LANGUAGES（auto+5 语种）
+        const optN = await page.locator('.xcc-panel .xcc-lang option').count();
+        if (optN < 6) throw new Error('语种选项不足 6 个: ' + optN);
+        await langE2E('en', 'Always write in English');
       } finally {
         // 收尾恢复中文，防止污染后续步骤（教训：不恢复会连坐后面断言）
-        await page.locator('.xcc-panel [data-act="lang-zh"]').click().catch(() => {});
+        await page.locator('.xcc-panel .xcc-lang').selectOption('zh').catch(() => {});
         await page.waitForTimeout(500);
+      }
+    });
+
+    await step('语种注册表：日语可用（新语种=注册表一行，零 UI 硬编码）', async () => {
+      try {
+        await langE2E('ja', '必ず日本語で書いてください');
+      } finally {
+        await page.locator('.xcc-panel .xcc-lang').selectOption('zh').catch(() => {});
+        await page.waitForTimeout(500);
+      }
+    });
+
+    // v0.5.23 界面语言：面板文案整体切换（es 验证），设置页保持中文
+    await step('界面语言：切西语面板文案跟换，恢复中文（收尾）', async () => {
+      const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
+      if (!optsPage) throw new Error('options 页未打开（步骤顺序错误）');
+      try {
+        await optsPage.evaluate(async () => {
+          const { settings } = await chrome.storage.local.get('settings');
+          settings.uiLanguage = 'es';
+          await chrome.storage.local.set({ settings });
+        });
+        await page.waitForTimeout(900);
+        const labels = await page.evaluate(() => {
+          const sr = document.querySelector('#xcc-host').shadowRoot;
+          return {
+            gen: sr.querySelector('.xcc-gen-btn').textContent,
+            insert: sr.querySelector('.xcc-row .xcc-main').textContent,
+            vendor: sr.querySelector('.xcc-lb').textContent,
+            langAuto: sr.querySelector('.xcc-lang option[value="auto"]').textContent
+          };
+        });
+        if (labels.gen !== '✦ Generar') throw new Error('生成按钮未切西语: ' + labels.gen);
+        if (labels.insert !== 'Insertar') throw new Error('插入按钮未切西语: ' + labels.insert);
+        if (labels.vendor !== 'Proveedor') throw new Error('标签未切西语: ' + labels.vendor);
+        if (labels.langAuto !== 'Seguir al tuit') throw new Error('auto 选项未切西语: ' + labels.langAuto);
+        // 存储脏值防线：uiLanguage 非法值回落 zh（经 merge/publicSettings 链路）
+        await optsPage.evaluate(async () => {
+          const { settings } = await chrome.storage.local.get('settings');
+          settings.uiLanguage = 'fr';
+          await chrome.storage.local.set({ settings });
+        });
+        await page.waitForTimeout(900);
+        const afterDirty = await page.evaluate(() => {
+          const sr = document.querySelector('#xcc-host').shadowRoot;
+          return sr.querySelector('.xcc-gen-btn').textContent;
+        });
+        if (afterDirty !== '✦ 生成') throw new Error('脏 uiLanguage 未回落中文: ' + afterDirty);
+      } finally {
+        await optsPage.evaluate(async () => {
+          const { settings } = await chrome.storage.local.get('settings');
+          settings.uiLanguage = 'zh';
+          await chrome.storage.local.set({ settings });
+        }).catch(() => {});
+        await page.waitForTimeout(700);
       }
     });
 

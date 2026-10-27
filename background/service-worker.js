@@ -53,9 +53,13 @@ function buildMessages(s, req) {
   }
 
   let sys = persona ? String(persona.persona) : '你是 X 平台上的活跃用户，表达自然。';
-  if (s.genParams.language === 'zh') sys += '\n\n务必使用中文撰写。';
-  else if (s.genParams.language === 'en') sys += '\n\nAlways write in English.';
-  else sys += '\n\n默认使用与推文相同的语言；无法判断时用中文。';
+  // 输出语种（v0.5.23 查注册表）：指令文本用目标语言本身写；'auto' 给跟随规则
+  const langEntry = xccLangEntry(s.genParams.language);
+  if (langEntry) {
+    sys += '\n\n' + langEntry.directive;
+  } else {
+    sys += '\n\n默认使用与推文相同的语言；无法判断时用中文。';
+  }
 
   // 输出格式硬约束：压制 markdown 残留与"好的/以下是…"类前后缀
   sys +=
@@ -110,9 +114,13 @@ function buildHumanizeMessages(s, text) {
     '不许新增原文没有的事实、定性或"内幕感"解读（原文没说"缺货"就不能写缺货，没说"赌"就不能写赌）\n' +
     '- 每个分句改完必须通顺完整，改不顺就保留原句——宁可少改，不可改出病句\n' +
     '- 结尾保持原文的收尾方式，不许追加新的总结句、金句或"第二拍"态度';
-  if (s.genParams.language === 'zh') sys += '\n\n保持中文。';
-  else if (s.genParams.language === 'en') sys += '\n\nKeep it in English.';
-  else sys += '\n\n保持原评论的语言不变。';
+  // 语言跟随主生成设置（v0.5.23 查注册表）：注册表语种注入对应语言的保持指令
+  const langEntry = xccLangEntry(s.genParams.language);
+  if (langEntry) {
+    sys += '\n\n' + langEntry.hum;
+  } else {
+    sys += '\n\n保持原评论的语言不变。';
+  }
   // 长度约束与第一段一致：免费 280 硬约束（改写不得变长突破上限）；付费模糊参考
   if (s.genParams.xPlan === 'premium') {
     sys += '\n\n长度与原评论相近即可，不得明显变长。';

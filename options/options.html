@@ -132,12 +132,10 @@
       <input type="range" id="temp" min="0" max="1.5" step="0.1" value="0.9"></div>
     <div class="field"><label>最大生成长度（max_tokens）</label>
       <input type="number" id="maxtok" min="50" max="2000" step="50" value="400"></div>
-    <div class="field"><label>语言</label>
-      <select id="lang">
-        <option value="auto">跟随推文语言（默认）</option>
-        <option value="zh">强制中文</option>
-        <option value="en">强制英文</option>
-      </select></div>
+    <div class="field"><label>语言（生成回复的语种）</label>
+      <select id="lang"></select></div>
+    <div class="field"><label>界面语言（面板文案，给外语用户）</label>
+      <select id="ui-lang"></select></div>
     <div class="field"><label>思考强度（reasoning_effort，仅推理模型生效）</label>
       <select id="reasoning">
         <option value="default">默认 · 不发送该参数（兼容所有接口）</option>
