@@ -28,6 +28,7 @@
       vendor: '供应商', model: '模型', persona: '人设', style: '生成风格',
       stanceNeg: '消极', stanceObj: '客观', stancePos: '乐观',
       langAuto: '跟推文', langTitle: '输出语种：生成回复与去AI味改写都跟随；跟推文=随原推语言',
+      uiLangAuto: '跟浏览器', uiLangTitle: '界面语言：切换本面板的按钮与提示文案（不影响生成语种）',
       planFree: '免费 · ≤280 字符', planPremium: '付费 · 不限长',
       targetLenPh: '目标字数（选填，如 120，模糊参考）',
       captured: '已捕获推文', clearTitle: '清除捕获', captureTitle: '捕获这条推文',
@@ -73,6 +74,7 @@
       vendor: 'Provider', model: 'Model', persona: 'Persona', style: 'Style',
       stanceNeg: 'Negative', stanceObj: 'Neutral', stancePos: 'Positive',
       langAuto: 'Auto', langTitle: 'Output language (used for generation and humanize pass); Auto = follow the tweet',
+      uiLangAuto: 'Browser', uiLangTitle: 'UI language: switches this panel’s labels and messages (does not change the output language)',
       planFree: 'Free · ≤280 chars', planPremium: 'Paid · unlimited',
       targetLenPh: 'Target length (optional, e.g. 120)',
       captured: 'Captured tweet', clearTitle: 'Clear capture', captureTitle: 'Capture this tweet',
@@ -118,6 +120,7 @@
       vendor: 'プロバイダー', model: 'モデル', persona: 'ペルソナ', style: 'スタイル',
       stanceNeg: '悲観', stanceObj: '客観', stancePos: '楽観',
       langAuto: 'ツイートに合わせる', langTitle: '出力言語（生成・AI消し両方に適用）。ツイートに合わせる=元ツイートの言語に従う',
+      uiLangAuto: 'ブラウザー', uiLangTitle: '表示言語：このパネルのボタンやメッセージを切り替えます（出力言語には影響しません）',
       planFree: '無料 · ≤280字', planPremium: '有料 · 無制限',
       targetLenPh: '目標文字数（任意・例 120）',
       captured: '取得済みツイート', clearTitle: '取得を消す', captureTitle: 'このツイートを取得',
@@ -163,6 +166,7 @@
       vendor: 'Proveedor', model: 'Modelo', persona: 'Persona', style: 'Estilo',
       stanceNeg: 'Negativo', stanceObj: 'Neutral', stancePos: 'Positivo',
       langAuto: 'Seguir al tuit', langTitle: 'Idioma de salida (aplica a generación y reescritura); Seguir = idioma del tuit',
+      uiLangAuto: 'Navegador', uiLangTitle: 'Idioma de la interfaz: cambia los textos de este panel (no afecta al idioma de salida)',
       planFree: 'Gratis · ≤280', planPremium: 'Premium · ilimitado',
       targetLenPh: 'Longitud objetivo (opcional, p. ej. 120)',
       captured: 'Tuit capturado', clearTitle: 'Borrar captura', captureTitle: 'Capturar este tuit',
@@ -208,6 +212,7 @@
       vendor: 'Anbieter', model: 'Modell', persona: 'Persona', style: 'Stil',
       stanceNeg: 'Negativ', stanceObj: 'Neutral', stancePos: 'Positiv',
       langAuto: 'Wie Tuit', langTitle: 'Ausgabesprache (gilt für Generierung und Umformung); Wie Tuit = Sprache des Tweets',
+      uiLangAuto: 'Browser', uiLangTitle: 'Oberflächensprache: wechselt die Texte dieses Panels (ändert nicht die Ausgabesprache)',
       planFree: 'Gratis · ≤280', planPremium: 'Premium · unbegrenzt',
       targetLenPh: 'Ziellänge (optional, z. B. 120)',
       captured: 'Erfasster Tweet', clearTitle: 'Erfassung löschen', captureTitle: 'Diesen Tweet erfassen',
@@ -367,6 +372,13 @@
       font-size: 12.5px; font-weight: 600; padding: 4px 12px; border-radius: 999px;
     }
     button.xcc-set:hover { filter: brightness(1.15); color: #fff; }
+    /* 界面语言下拉（v0.5.24）：放面板头部——受众是外语用户自己，设置页全中文他们
+       找不到入口。选项用自称（中文/English/日本語/...），任何界面语言下都认得出 */
+    select.xcc-uilang {
+      width: 86px; padding: 3px 4px; font-size: 12px;
+      border-radius: 8px; border-color: rgba(255,255,255,.18);
+      margin-right: 2px;
+    }
     .xcc-update {
       font-size: 11.5px; color: #fbbf24; cursor: pointer;
       padding: 4px 8px; border-radius: 7px;
@@ -470,6 +482,7 @@
     <div class="xcc-head">
       <span class="xcc-title">✦ 评论副驾</span>
       <span>
+        <select class="xcc-uilang" title="界面语言"></select>
         <button class="xcc-set" data-act="settings" title="打开设置（模型接入 / 提示词 / 生成参数）" data-i18n="settings">⚙ 设置</button>
         <button class="xcc-mini" data-act="close" title="收起面板" data-i18n-title="closeTitle">✕</button>
       </span>
@@ -530,6 +543,7 @@
     genSel: shadow.querySelector('.xcc-gen'),
     stanceBtns: shadow.querySelectorAll('.xcc-stance-btn'),
     langSel: shadow.querySelector('.xcc-lang'),
+    uilangSel: shadow.querySelector('.xcc-uilang'),
     planFree: shadow.querySelector('[data-act="plan-free"]'),
     planPremium: shadow.querySelector('[data-act="plan-premium"]'),
     targetLen: shadow.querySelector('.xcc-target-len'),
@@ -593,6 +607,32 @@
     });
   }
 
+  // 界面语言下拉渲染（v0.5.24）：选项 = 跟浏览器(T) + 各语种自称；值严格=存储的
+  // uiLanguage。auto 标签随当前界面语言刷新（切语言后自己也能看懂）
+  function renderUiLang() {
+    if (!els.uilangSel) return;
+    const cur = (state.settings && state.settings.uiLanguage) || 'zh';
+    const want = cur === 'auto' || XCC_UI_TEXT[cur] ? cur : 'zh';
+    if (!els.uilangSel.options.length || els.uilangSel.options.length !== XCC_UI_LANGS.length + 1) {
+      els.uilangSel.textContent = '';
+      const auto = document.createElement('option');
+      auto.value = 'auto';
+      auto.textContent = T('uiLangAuto');
+      els.uilangSel.appendChild(auto);
+      for (const id of XCC_UI_LANGS) {
+        const o = document.createElement('option');
+        o.value = id;
+        const e = XCC_LANGUAGES.find((x) => x.id === id);
+        o.textContent = e ? e.label : id;
+        els.uilangSel.appendChild(o);
+      }
+    } else {
+      els.uilangSel.options[0].textContent = T('uiLangAuto');
+    }
+    els.uilangSel.title = T('uiLangTitle');
+    els.uilangSel.value = want;
+  }
+
   // 界面语言应用（v0.5.23）：data-i18n/-ph/-title 三属性批量刷文案 + 语言相关的
   // 动态渲染刷新。语言未变时跳过（applySettings 每次存储变更都会跑）
   function applyUiLang(pref) {
@@ -612,6 +652,7 @@
       if (!state.captured) els.tweetBd.textContent = T('captureHint');
     }
     if (state.settings) {
+      renderUiLang();
       renderLang();
       renderHumanize();
       updateCount();
@@ -1485,6 +1526,17 @@
     if (state.settings && state.settings.genParams) state.settings.genParams.language = v;
     mutateSettings((m) => {
       m.genParams.language = v;
+    }).catch(() => {});
+  });
+  // 界面语言（v0.5.24 面板头部下拉）：本地即时切文案（applyUiLang 全量重刷），
+  // 落盘后 storage.onChanged 会再同步一次远端变化
+  els.uilangSel.addEventListener('change', () => {
+    const v = els.uilangSel.value;
+    if (!(v === 'auto' || XCC_UI_TEXT[v])) return;
+    if (state.settings) state.settings.uiLanguage = v;
+    applyUiLang(v);
+    mutateSettings((m) => {
+      m.uiLanguage = v;
     }).catch(() => {});
   });
 

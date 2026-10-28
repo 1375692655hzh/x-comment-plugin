@@ -104,7 +104,9 @@ check(
 );
 check(content.includes('XCC_UI_TEXT') && content.includes('function T(key, params)'), '面板界面文案多语言表与 T() 存在');
 check(common.includes('XCC_UI_LANGS'), 'common.js 定义界面语言候选 XCC_UI_LANGS');
-check(oh.includes('id="ui-lang"'), '设置页存在界面语言下拉');
+check(content.includes('select class="xcc-uilang"'), '面板头部存在界面语言下拉（受众=外语用户自己）');
+check(content.includes('function renderUiLang'), '面板有 renderUiLang 渲染函数（显示严格=存储值）');
+check(!oh.includes('id="ui-lang"'), '设置页不再有界面语言控件（v0.5.24 移到面板）');
 
 check(common.includes('XCC_OAUTH_MODEL_FALLBACK'), 'common.js 定义 oauth 兜底候选（面板共用）');
 check(!oj.includes('const XCC_OAUTH_MODEL_FALLBACK'), 'options.js 不重复声明兜底常量（防经典 script 共享全局 SyntaxError）');

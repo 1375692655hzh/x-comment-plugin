@@ -706,16 +706,16 @@ const server = http.createServer((req, res) => {
       }
     });
 
-    // v0.5.23 界面语言：面板文案整体切换（es 验证），设置页保持中文
-    await step('界面语言：切西语面板文案跟换，恢复中文（收尾）', async () => {
+    // v0.5.24 界面语言：控件在面板头部（受众=外语用户），切西语整批跟换+脏值回落
+    await step('界面语言：面板头部下拉切西语文案跟换，恢复中文（收尾）', async () => {
       const optsPage = context.pages().find((p) => p.url().includes('options/options.html'));
       if (!optsPage) throw new Error('options 页未打开（步骤顺序错误）');
       try {
-        await optsPage.evaluate(async () => {
-          const { settings } = await chrome.storage.local.get('settings');
-          settings.uiLanguage = 'es';
-          await chrome.storage.local.set({ settings });
-        });
+        // 控件在面板不在设置页（v0.5.24 迁移）
+        const uiOptsN = await page.locator('.xcc-panel .xcc-uilang option').count();
+        if (uiOptsN !== 6) throw new Error('界面语言选项应 6 个（auto+5）: ' + uiOptsN);
+        if (await optsPage.locator('#ui-lang').count()) throw new Error('设置页不应再有 #ui-lang');
+        await page.locator('.xcc-panel .xcc-uilang').selectOption('es');
         await page.waitForTimeout(900);
         const labels = await page.evaluate(() => {
           const sr = document.querySelector('#xcc-host').shadowRoot;
@@ -743,6 +743,7 @@ const server = http.createServer((req, res) => {
         });
         if (afterDirty !== '✦ 生成') throw new Error('脏 uiLanguage 未回落中文: ' + afterDirty);
       } finally {
+        await page.locator('.xcc-panel .xcc-uilang').selectOption('zh').catch(() => {});
         await optsPage.evaluate(async () => {
           const { settings } = await chrome.storage.local.get('settings');
           settings.uiLanguage = 'zh';
